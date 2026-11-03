@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0D191C;
+  --foreground: #F5FDFF;
+}
+
+body {
+  background-color: #0D191C;
+  color: #F5FDFF;
+  font-family: var(--font-mono), monospace;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom chamfer clip-path */
+.clip-chamfer {
+  clip-path: polygon(
+    12px 0,
+    100% 0,
+    100% calc(100% - 12px),
+    calc(100% - 12px) 100%,
+    0 100%,
+    0 12px
+  );
+}
+
+.clip-chamfer-sm {
+  clip-path: polygon(
+    8px 0,
+    100% 0,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    0 100%,
+    0 8px
+  );
+}
+
+/* AR Grid pattern background */
+.ar-grid-bg {
+  background-image: 
+    linear-gradient(to right, rgba(41, 64, 68, 0.25) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(41, 64, 68, 0.25) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Reticle crosshair */
+.reticle-crosshair {
+  position: relative;
+}
+.reticle-crosshair::before,
+.reticle-crosshair::after {
+  content: '';
+  position: absolute;
+  background-color: #0EB29A;
+}
+.reticle-crosshair::before {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  transform: translateY(-50%);
+}
+.reticle-crosshair::after {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+/* Hide scrollbar for tabs */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
