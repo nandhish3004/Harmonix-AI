@@ -47,8 +47,8 @@ export default function LanguageSelectionPage() {
       } = await supabase.auth.getUser();
 
       if (user) {
-        await supabase
-          .from("profiles")
+        await (supabase
+          .from("profiles") as any)
           .update({ language_preference: selectedLang })
           .eq("id", user.id);
       }

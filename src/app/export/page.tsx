@@ -193,8 +193,8 @@ EOF
       }
 
       // 1. Insert scan record
-      const { data: scanData, error: scanError } = await supabase
-        .from("workpiece_scans")
+      const { data: scanData, error: scanError } = await (supabase
+        .from("workpiece_scans") as any)
         .insert({
           user_id: user.id,
           name: "FR4 Plate #HX-9042",
@@ -206,22 +206,22 @@ EOF
             { x: 348, y: 580 },
             { x: 45, y: 580 },
           ],
-        })
+        } as any)
         .select()
         .single();
 
       if (scanError) throw scanError;
 
       // 2. Insert inspection session
-      const { error: sessionError } = await supabase
-        .from("inspection_sessions")
+      const { error: sessionError } = await (supabase
+        .from("inspection_sessions") as any)
         .insert({
-          scan_id: scanData.id,
+          scan_id: scanData?.id,
           peak_frequency_hz: 702.0,
           active_mode: "Mode (2,2) Radial Cross",
           vibration_score: 88.5,
           defect_detected: true,
-        });
+        } as any);
 
       if (sessionError) throw sessionError;
 

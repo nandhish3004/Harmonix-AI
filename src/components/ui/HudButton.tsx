@@ -3,7 +3,7 @@ import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 interface HudButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "primary" | "secondary" | "danger" | "ghost" | "lime";
+  variant?: "primary" | "secondary" | "danger" | "ghost" | "lime" | "safe";
   size?: "sm" | "md" | "lg";
   fullWidth?: boolean;
   isLoading?: boolean;
@@ -40,6 +40,8 @@ export const HudButton: React.FC<HudButtonProps> = ({
       "bg-[#2D0A0A] text-[#FF4444] border border-[#FF4444]/60 hover:bg-[#3d0e0e]",
     ghost:
       "bg-transparent text-[#8C999A] hover:text-[#F5FDFF] hover:bg-[#15282C]",
+    safe:
+      "bg-[#0D2B1A] text-[#4ADE80] border border-[#4ADE80]/60 hover:bg-[#133d25] font-bold",
   };
 
   return (
