@@ -41,6 +41,7 @@ export default function AudioPitchTunerPage() {
     note,
     volume,
     isListening,
+    waveform,
     startListening,
     stopListening,
     setTargetResonance,
@@ -82,7 +83,7 @@ export default function AudioPitchTunerPage() {
     const gain = toneCtxRef.current.createGain();
     osc.type = "sine";
     osc.frequency.setValueAtTime(targetFrequency, toneCtxRef.current.currentTime);
-    gain.gain.setValueAtTime(0.08, toneCtxRef.current.currentTime);
+    gain.gain.setValueAtTime(0.35, toneCtxRef.current.currentTime);
     osc.connect(gain);
     gain.connect(toneCtxRef.current.destination);
     osc.start();
@@ -143,7 +144,29 @@ export default function AudioPitchTunerPage() {
           `HuggingFace AST locked ${aiRes.peak_hz} Hz • ${aiRes.ast_top_class} (${Math.round(aiRes.ast_confidence * 100)}%)`
         );
       } else {
-        setTapSummary(`Browser FFT captured ring-down near ${frequency} Hz.`);
+        // Real in-browser Goertzel/DFT peak frequency scan (100..2500 Hz)
+        const slice = samples.slice(0, 2048);
+        let bestFreq = targetFrequency;
+        let bestMag = -1;
+        for (let f = 120; f <= 2400; f += 15) {
+          let re = 0;
+          let im = 0;
+          const w = (2 * Math.PI * f) / sampleRate;
+          for (let i = 0; i < slice.length; i += 2) {
+            re += slice[i] * Math.cos(w * i);
+            im -= slice[i] * Math.sin(w * i);
+          }
+          const mag = re * re + im * im;
+          if (mag > bestMag) {
+            bestMag = mag;
+            bestFreq = f;
+          }
+        }
+        setTargetFrequency(bestFreq);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("harmonix_measured_freq", String(bestFreq));
+        }
+        setTapSummary(`Tap-Test FFT locked peak at ${bestFreq} Hz.`);
       }
     } finally {
       setIsTapTesting(false);
@@ -204,6 +227,23 @@ export default function AudioPitchTunerPage() {
                 }}
               />
             </div>
+          </div>
+
+          {/* Live 32-Bar Audio Waveform Visualizer */}
+          <div className="w-64 h-10 mt-4 flex items-end justify-center gap-[3px] px-2">
+            {waveform.map((v, idx) => (
+              <div
+                key={idx}
+                className={`w-1.5 rounded-t-sm transition-all duration-75 ${
+                  isListening
+                    ? isResonant
+                      ? "bg-emerald-500 dark:bg-[#4ADE80]"
+                      : "bg-sky-500 dark:bg-[#0EB29A]"
+                    : "bg-slate-300 dark:bg-[#233A3D]"
+                }`}
+                style={{ height: `${Math.max(12, Math.round(v * 100))}%` }}
+              />
+            ))}
           </div>
 
           {/* Audio input level readout */}

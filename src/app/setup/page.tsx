@@ -184,7 +184,7 @@ export default function SetupCalibrationPage() {
     const gain = toneCtxRef.current.createGain();
     osc.type = "sine";
     osc.frequency.setValueAtTime(sweepHz, toneCtxRef.current.currentTime);
-    gain.gain.setValueAtTime(0.12, toneCtxRef.current.currentTime);
+    gain.gain.setValueAtTime(0.35, toneCtxRef.current.currentTime);
     osc.connect(gain);
     gain.connect(toneCtxRef.current.destination);
     osc.start();

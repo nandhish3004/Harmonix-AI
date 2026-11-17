@@ -8,6 +8,7 @@ export interface AudioPitchState {
   note: string;
   volume: number;
   isListening: boolean;
+  waveform: number[];
   startListening: () => Promise<void>;
   stopListening: () => void;
   setTargetResonance: (freq: number, tolerance?: number) => void;
@@ -32,9 +33,11 @@ export function useAudioPitch(initialTargetFrequency: number = 440): AudioPitchS
   const [note, setNote] = useState<string>("A4");
   const [volume, setVolume] = useState<number>(0);
   const [isListening, setIsListening] = useState<boolean>(false);
+  const [waveform, setWaveform] = useState<number[]>(() => new Array(32).fill(0));
 
   const targetFreqRef = useRef<number>(initialTargetFrequency);
   const toleranceRef = useRef<number>(15);
+  const freqRef = useRef<number>(initialTargetFrequency);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -43,11 +46,8 @@ export function useAudioPitch(initialTargetFrequency: number = 440): AudioPitchS
   const setTargetResonance = useCallback((freq: number, tolerance: number = 15) => {
     targetFreqRef.current = freq;
     toleranceRef.current = tolerance;
-    setIsResonant((prev) => {
-      void prev;
-      return Math.abs(frequency - freq) <= tolerance;
-    });
-  }, [frequency]);
+    setIsResonant(Math.abs(freqRef.current - freq) <= tolerance);
+  }, []);
 
   const stopListening = useCallback(() => {
     if (animFrameRef.current) {
@@ -79,10 +79,23 @@ export function useAudioPitch(initialTargetFrequency: number = 440): AudioPitchS
       sum += buffer[i] * buffer[i];
     }
     const rms = Math.sqrt(sum / bufferLength);
-    setVolume(Math.min(1, rms * 10));
+    setVolume(Math.min(1, rms * 16));
 
-    // Autocorrelation pitch detection algorithm
-    if (rms > 0.01) {
+    // Downsample 32-bar live waveform for visual feedback
+    const bars: number[] = [];
+    const stride = Math.floor(bufferLength / 32);
+    for (let b = 0; b < 32; b++) {
+      let peak = 0;
+      for (let k = 0; k < stride; k++) {
+        const v = Math.abs(buffer[b * stride + k]);
+        if (v > peak) peak = v;
+      }
+      bars.push(Math.min(1, peak * 6));
+    }
+    setWaveform(bars);
+
+    // Autocorrelation pitch detection algorithm (sensitive threshold for mobile mics)
+    if (rms > 0.0025) {
       let r1 = 0;
       let r2 = bufferLength - 1;
       const thres = 0.2;
@@ -122,6 +135,7 @@ export function useAudioPitch(initialTargetFrequency: number = 440): AudioPitchS
       if (T0 > 0 && audioCtxRef.current) {
         const detectedFreq = Math.round(audioCtxRef.current.sampleRate / T0);
         if (detectedFreq > 20 && detectedFreq < 8000) {
+          freqRef.current = detectedFreq;
           setFrequency(detectedFreq);
           setNote(frequencyToNote(detectedFreq));
           const diff = Math.abs(detectedFreq - targetFreqRef.current);
@@ -183,6 +197,7 @@ export function useAudioPitch(initialTargetFrequency: number = 440): AudioPitchS
     note,
     volume,
     isListening,
+    waveform,
     startListening,
     stopListening,
     setTargetResonance,

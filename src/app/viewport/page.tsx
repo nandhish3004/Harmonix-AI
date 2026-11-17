@@ -372,7 +372,7 @@ export default function ChladniViewportPage() {
     const gain = audioCtxRef.current.createGain();
     osc.type = "sine";
     osc.frequency.setValueAtTime(frequency, audioCtxRef.current.currentTime);
-    gain.gain.setValueAtTime(0.08, audioCtxRef.current.currentTime);
+    gain.gain.setValueAtTime(0.35, audioCtxRef.current.currentTime);
     osc.connect(gain);
     gain.connect(audioCtxRef.current.destination);
     osc.start();

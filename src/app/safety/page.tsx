@@ -34,9 +34,9 @@ interface ComponentItem {
 }
 
 const INITIAL_COMPONENTS: ComponentItem[] = [
-  { id: "comp-1", name: "24MHz Crystal Oscillator", tag: "XTAL-24M", x: 180, y: 160, sensitivity: "CRITICAL" },
-  { id: "comp-2", name: "BGA Microcontroller", tag: "MCU-BGA-144", x: 95, y: 95, sensitivity: "HIGH" },
-  { id: "comp-3", name: "100uF MLCC Cap", tag: "C-1206-MLCC", x: 265, y: 240, sensitivity: "HIGH" },
+  { id: "comp-1", name: "Timing Crystal (Fragile)", tag: "CRYSTAL", x: 180, y: 160, sensitivity: "CRITICAL" },
+  { id: "comp-2", name: "Main Processor Chip", tag: "CPU-CHIP", x: 95, y: 95, sensitivity: "HIGH" },
+  { id: "comp-3", name: "Ceramic Cap (Cracks easily)", tag: "CAPACITOR", x: 265, y: 240, sensitivity: "HIGH" },
 ];
 
 export default function ComponentSafetyPage() {
