@@ -15,7 +15,18 @@ import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
-import { chladniAmplitude, getStoredActiveMode } from "@/utils/physics";
+import {
+  chladniAmplitude,
+  computeEigenfrequencyHz,
+  DEFAULT_MATERIAL,
+  evalPlateMechanics,
+  getStoredActiveMode,
+  getStoredMaterial,
+  getStoredPlateGeometry,
+  getStoredStandoffs,
+  getStoredThickness,
+  MaterialData,
+} from "@/utils/physics";
 import { computePinnModal } from "@/utils/aiClient";
 
 interface StandoffItem {
@@ -45,6 +56,12 @@ export default function ComponentSafetyPage() {
   const nodalCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [mode, setMode] = useState({ m: 2, n: 2, indices: "(2, 2)", freqHz: 740 });
+  const [material, setMaterial] = useState<MaterialData>(DEFAULT_MATERIAL);
+  const [thicknessMm, setThicknessMm] = useState<number>(1.6);
+  const [plateGeo, setPlateGeo] = useState<{ areaMm2: number; aspectRatio: number }>({
+    areaMm2: 14250,
+    aspectRatio: 1.2,
+  });
   const [components, setComponents] = useState<ComponentItem[]>(INITIAL_COMPONENTS);
   const [standoffs, setStandoffs] = useState<StandoffItem[]>([]);
   const [isAddingStandoff, setIsAddingStandoff] = useState<boolean>(false);
@@ -56,6 +73,15 @@ export default function ComponentSafetyPage() {
   useEffect(() => {
     const active = getStoredActiveMode();
     setMode({ m: active.m, n: active.n, indices: active.indices, freqHz: active.freqHz });
+    setMaterial(getStoredMaterial());
+    setThicknessMm(getStoredThickness());
+    setPlateGeo(getStoredPlateGeometry());
+    const savedPins = getStoredStandoffs();
+    if (savedPins.length > 0) {
+      setStandoffs(
+        savedPins.map((p, i) => ({ id: p.id || `pin-${i}`, x: p.x, y: p.y }))
+      );
+    }
     if (typeof window !== "undefined") {
       try {
         const saved = localStorage.getItem("harmonix_components");
@@ -71,12 +97,7 @@ export default function ComponentSafetyPage() {
 
   // Evaluate amplitude at normalized (nx, ny) including virtual standoff clamping
   const evalWithStandoffs = (nx: number, ny: number) => {
-    let amp = Math.abs(
-      mode.m === mode.n
-        ? Math.sin(mode.m * Math.PI * nx) * Math.sin(mode.n * Math.PI * ny) +
-            0.35 * Math.cos(mode.m * Math.PI * nx) * Math.cos(mode.n * Math.PI * ny)
-        : chladniAmplitude(nx, ny, mode.m, mode.n)
-    );
+    let amp = Math.abs(chladniAmplitude(nx, ny, mode.m, mode.n));
     for (const pin of standoffs) {
       const pnx = pin.x / boardSize.w;
       const pny = pin.y / boardSize.h;
@@ -144,7 +165,41 @@ export default function ComponentSafetyPage() {
   const activeComp = components.find((c) => c.id === selectedCompId) || components[0];
   const vibrationScore = computeScore(activeComp);
   const isSafe = vibrationScore >= 70;
-  const nodalOffsetMm = ((100 - vibrationScore) * 0.42).toFixed(1);
+
+  const normStandoffs = standoffs.map((s) => ({
+    nx: s.x / boardSize.w,
+    ny: s.y / boardSize.h,
+  }));
+  const activeMech = evalPlateMechanics(
+    Math.max(0, Math.min(1, activeComp.x / boardSize.w)),
+    Math.max(0, Math.min(1, activeComp.y / boardSize.h)),
+    mode.m,
+    mode.n,
+    material,
+    thicknessMm,
+    plateGeo.areaMm2,
+    plateGeo.aspectRatio,
+    normStandoffs
+  );
+  const baseEigenHz = computeEigenfrequencyHz(
+    mode.m,
+    mode.n,
+    material,
+    thicknessMm,
+    plateGeo.areaMm2,
+    plateGeo.aspectRatio,
+    0
+  );
+  const stiffenedEigenHz = computeEigenfrequencyHz(
+    mode.m,
+    mode.n,
+    material,
+    thicknessMm,
+    plateGeo.areaMm2,
+    plateGeo.aspectRatio,
+    standoffs.length
+  );
+  const stiffeningDeltaHz = stiffenedEigenHz - baseEigenHz;
 
   const handlePointerDown = (id: string) => {
     setSelectedCompId(id);
@@ -397,22 +452,26 @@ export default function ComponentSafetyPage() {
           })}
         </div>
 
-        {/* Placement Telemetry Specs */}
+        {/* Placement Telemetry Specs (Kirchhoff-Love + Basquin Fatigue) */}
         <ChamferedCard className="p-3.5 space-y-2">
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-slate-500 dark:text-[#8C999A]">NODAL OFFSET:</span>
-            <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">{nodalOffsetMm} mm</span>
-          </div>
-          <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-slate-500 dark:text-[#8C999A]">ESTIMATED CYCLIC ACCELERATION:</span>
-            <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">
-              {((100 - vibrationScore) * 0.14).toFixed(2)} G RMS
+            <span className="text-slate-500 dark:text-[#8C999A]">RAYLEIGH STIFFENING SHIFT:</span>
+            <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">
+              {stiffenedEigenHz} Hz ({stiffeningDeltaHz > 0 ? `+${stiffeningDeltaHz} Hz` : "0 Hz"})
             </span>
           </div>
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-slate-500 dark:text-[#8C999A]">SOLDER JOINT FATIGUE LIFETIME:</span>
+            <span className="text-slate-500 dark:text-[#8C999A]">MODAL RMS ACCELERATION:</span>
+            <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">
+              {activeMech.rmsAccelG.toFixed(2)} G RMS (σ = {activeMech.vonMisesMpa.toFixed(1)} MPa)
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-xs font-mono">
+            <span className="text-slate-500 dark:text-[#8C999A]">BASQUIN FATIGUE LIFETIME (N_f):</span>
             <span className={isSafe ? "text-emerald-700 dark:text-[#4ADE80] font-bold" : "text-red-700 dark:text-[#FF4444] font-bold"}>
-              {isSafe ? "> 250,000 CYCLES" : "< 14,000 CYCLES (FAIL)"}
+              {activeMech.fatigueLifeCycles >= 1_000_000
+                ? "> 1,000,000 CYCLES"
+                : `${activeMech.fatigueLifeCycles.toLocaleString()} CYCLES`}
             </span>
           </div>
         </ChamferedCard>

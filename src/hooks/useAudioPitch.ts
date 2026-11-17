@@ -132,8 +132,17 @@ export function useAudioPitch(initialTargetFrequency: number = 440): AudioPitchS
       }
 
       let T0 = maxpos;
+      if (T0 > 1 && T0 < trimmed.length - 1) {
+        const y1 = c[T0 - 1];
+        const y2 = c[T0];
+        const y3 = c[T0 + 1];
+        const denom = 2 * (2 * y2 - y1 - y3);
+        if (Math.abs(denom) > 1e-6) {
+          T0 = T0 + (y1 - y3) / denom;
+        }
+      }
       if (T0 > 0 && audioCtxRef.current) {
-        const detectedFreq = Math.round(audioCtxRef.current.sampleRate / T0);
+        const detectedFreq = Math.round((audioCtxRef.current.sampleRate / T0) * 10) / 10;
         if (detectedFreq > 20 && detectedFreq < 8000) {
           freqRef.current = detectedFreq;
           setFrequency(detectedFreq);

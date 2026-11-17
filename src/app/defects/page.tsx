@@ -7,28 +7,38 @@ import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
+import { getStoredActiveMode, getStoredPlateGeometry } from "@/utils/physics";
 
 export default function DefectAnalysisPage() {
   const router = useRouter();
 
   const [baselineHz, setBaselineHz] = useState<number>(740);
   const [actualHz, setActualHz] = useState<number>(702);
+  const [plateAreaMm2, setPlateAreaMm2] = useState<number>(14250);
 
   useEffect(() => {
+    const mode = getStoredActiveMode();
+    const geo = getStoredPlateGeometry();
+    setPlateAreaMm2(geo.areaMm2);
+
     if (typeof window !== "undefined") {
-      const base = Number(localStorage.getItem("harmonix_peak_freq"));
+      const savedBase = Number(localStorage.getItem("harmonix_peak_freq"));
+      const base = Number.isFinite(savedBase) && savedBase > 50 ? savedBase : mode.freqHz;
       const meas = Number(localStorage.getItem("harmonix_measured_freq"));
-      if (Number.isFinite(base) && base > 50) setBaselineHz(base);
+      setBaselineHz(base);
       if (Number.isFinite(meas) && meas > 50) {
         setActualHz(meas);
-      } else if (Number.isFinite(base) && base > 50) {
+      } else {
         setActualHz(Math.max(50, base - 38));
       }
     }
   }, []);
 
   const deltaHz = actualHz - baselineHz;
-  const stiffnessDeltaPct = (((actualHz / Math.max(1, baselineHz)) ** 2 - 1) * 100).toFixed(1);
+  const freqRatioSq = Math.pow(actualHz / Math.max(1, baselineHz), 2);
+  const stiffnessDeltaPct = ((freqRatioSq - 1) * 100).toFixed(1);
+  const damageIndex = Math.max(0, 1 - freqRatioSq);
+  const voidRadiusMm = Math.sqrt((Math.abs(1 - freqRatioSq) * plateAreaMm2) / Math.PI);
   const defectDetected = Math.abs(deltaHz) > 15;
 
   const handleProceed = () => {
@@ -152,14 +162,14 @@ export default function DefectAnalysisPage() {
                 <circle
                   cx="215"
                   cy="120"
-                  r="14"
+                  r={Math.min(34, Math.max(8, voidRadiusMm * 0.45))}
                   fill="rgba(220, 38, 38, 0.2)"
                   stroke="#DC2626"
                   strokeWidth="2"
                   strokeDasharray="3 3"
                 />
                 <text x="215" y="100" fill="#DC2626" fontSize="10" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
-                  VOID Q2
+                  VOID r≈{voidRadiusMm.toFixed(1)}mm
                 </text>
               </>
             )}
@@ -190,9 +200,15 @@ export default function DefectAnalysisPage() {
           />
 
           <div className="flex items-center justify-between text-xs font-mono pt-1">
-            <span className="text-slate-500 dark:text-[#8C999A]">STIFFNESS VARIATION (Δk):</span>
+            <span className="text-slate-500 dark:text-[#8C999A]">STIFFNESS PERTURBATION (Δk/k₀):</span>
             <span className={`font-bold ${defectDetected ? "text-red-700 dark:text-[#FF4444]" : "text-emerald-700 dark:text-[#4ADE80]"}`}>
-              {stiffnessDeltaPct}%
+              {stiffnessDeltaPct}% (D = {damageIndex.toFixed(3)})
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-xs font-mono">
+            <span className="text-slate-500 dark:text-[#8C999A]">EQUIVALENT VOID RADIUS:</span>
+            <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">
+              {voidRadiusMm.toFixed(1)} mm (A = {plateAreaMm2} mm²)
             </span>
           </div>
           <div className="flex items-center justify-between text-xs font-mono">

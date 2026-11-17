@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Check,
@@ -10,86 +10,43 @@ import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
+import {
+  computeAllModes,
+  ComputedHarmonicMode,
+  DEFAULT_MATERIAL,
+  getStoredMaterial,
+  getStoredPlateGeometry,
+  getStoredStandoffs,
+  getStoredThickness,
+  MaterialData,
+} from "@/utils/physics";
 
-interface HarmonicMode {
-  id: string;
-  name: string;
-  indices: string;
-  freqHz: number;
-  qFactor: number;
-  type: string;
-  svgPath: string;
-  isPeakResonance?: boolean;
-}
-
-const MODES: HarmonicMode[] = [
-  {
-    id: "mode-1-1",
-    name: "Fundamental Mode",
-    indices: "(1, 1)",
-    freqHz: 215,
-    qFactor: 142,
-    type: "DIAGONAL SYMMETRY",
-    svgPath: "M 20 20 L 80 80 M 80 20 L 20 80",
-  },
-  {
-    id: "mode-2-0",
-    name: "Saddle Torsion",
-    indices: "(2, 0)",
-    freqHz: 430,
-    qFactor: 210,
-    type: "HYPERBOLIC",
-    svgPath: "M 50 10 L 50 90 M 10 50 L 90 50",
-  },
-  {
-    id: "mode-2-2",
-    name: "Radial Cross",
-    indices: "(2, 2)",
-    freqHz: 740,
-    qFactor: 380,
-    type: "RESONANT HARMONIC",
-    svgPath: "M 20 50 Q 50 20 80 50 Q 50 80 20 50 M 50 20 Q 20 50 50 80 Q 80 50 50 20",
-    isPeakResonance: true,
-  },
-  {
-    id: "mode-3-1",
-    name: "Clover Leaf",
-    indices: "(3, 1)",
-    freqHz: 1120,
-    qFactor: 295,
-    type: "COMPLEX MULTI-NODE",
-    svgPath: "M 30 10 L 30 90 M 70 10 L 70 90 M 10 50 L 90 50",
-  },
-  {
-    id: "mode-3-3",
-    name: "Starburst Matrix",
-    indices: "(3, 3)",
-    freqHz: 1850,
-    qFactor: 420,
-    type: "HIGH FREQUENCY",
-    svgPath: "M 25 25 L 75 75 M 75 25 L 25 75 M 50 15 L 50 85 M 15 50 L 85 50",
-  },
-  {
-    id: "mode-4-2",
-    name: "Higher Harmonic",
-    indices: "(4, 2)",
-    freqHz: 2480,
-    qFactor: 310,
-    type: "MODAL OVERTONE",
-    svgPath: "M 20 10 L 20 90 M 40 10 L 40 90 M 60 10 L 60 90 M 80 10 L 80 90",
-  },
-];
+const INITIAL_MODES: ComputedHarmonicMode[] = computeAllModes(DEFAULT_MATERIAL, 1.6);
 
 export default function HarmonicModesPage() {
   const router = useRouter();
+  const [modes, setModes] = useState<ComputedHarmonicMode[]>(INITIAL_MODES);
+  const [material, setMaterial] = useState<MaterialData>(DEFAULT_MATERIAL);
+  const [thicknessMm, setThicknessMm] = useState<number>(1.6);
   const [selectedModeId, setSelectedModeId] = useState<string>("mode-2-2");
 
-  const selectedMode = MODES.find((m) => m.id === selectedModeId) || MODES[2];
+  useEffect(() => {
+    const mat = getStoredMaterial();
+    const thick = getStoredThickness();
+    const geo = getStoredPlateGeometry();
+    const pins = getStoredStandoffs();
+    setMaterial(mat);
+    setThicknessMm(thick);
+    setModes(computeAllModes(mat, thick, geo.areaMm2, geo.aspectRatio, pins.length));
+  }, []);
 
-  const handleSelectMode = (mode: HarmonicMode) => {
+  const selectedMode = modes.find((m) => m.id === selectedModeId) || modes[2];
+
+  const handleSelectMode = (mode: ComputedHarmonicMode) => {
     setSelectedModeId(mode.id);
     if (typeof window !== "undefined") {
       localStorage.setItem("harmonix_active_mode", JSON.stringify(mode));
+      localStorage.setItem("harmonix_peak_freq", String(mode.freqHz));
     }
   };
 
@@ -103,11 +60,11 @@ export default function HarmonicModesPage() {
       <HudHeader
         title="HARMONIC GALLERY"
         step="SCREEN 06 // 10"
-        subtitle="Pre-computed Eigenmode Shapes"
+        subtitle={`Kirchhoff-Love // ${material.code} (${thicknessMm.toFixed(1)}mm)`}
         backHref="/tuner"
         rightAction={
           <HudBadge variant="teal">
-            6 MODES COMPUTED
+            6 EIGENMODES
           </HudBadge>
         }
       />
@@ -115,16 +72,16 @@ export default function HarmonicModesPage() {
       <div className="p-4 space-y-4 flex-1 flex flex-col">
         <div>
           <span className="text-xs font-mono text-slate-600 dark:text-[#8C999A] uppercase tracking-wider block mb-1 font-semibold">
-            EIGENVALUE NODAL EQUATIONS
+            fₘ,ₙ = (π/2)√(D/ρh) · [(m/a)² + (n/b)²]
           </span>
           <p className="text-xs font-mono text-slate-600 dark:text-[#8C999A]">
-            Select mode shape to test mechanical placement boundaries and isolate component shear stress.
+            Select mode shape calibrated to your scanned area &amp; material rigidity.
           </p>
         </div>
 
         {/* 2-Column Gallery Grid */}
         <div className="grid grid-cols-2 gap-3">
-          {MODES.map((mode) => {
+          {modes.map((mode) => {
             const isSelected = selectedModeId === mode.id;
             return (
               <button

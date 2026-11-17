@@ -23,18 +23,17 @@ import { useChladniShader } from "@/hooks/useChladniShader";
 import {
   chladniAmplitude,
   frequencyToMode,
+  computeHomography,
+  applyHomography,
   getStoredMaterial,
   getStoredThickness,
+  getStoredPlateGeometry,
   MaterialData,
+  Point2D,
   DEFAULT_MATERIAL,
 } from "@/utils/physics";
 
 type ViewMode = "ar" | "3d" | "2d";
-
-interface Point2D {
-  x: number;
-  y: number;
-}
 
 const DEFAULT_QUAD: Point2D[] = [
   { x: 55, y: 75 },
@@ -42,18 +41,6 @@ const DEFAULT_QUAD: Point2D[] = [
   { x: 325, y: 295 },
   { x: 35, y: 285 },
 ];
-
-/** Bilinear perspective projection from normalized (u, v) in [0,1]^2 to quad P1..P4. */
-function projectToQuad(u: number, v: number, q: Point2D[]): Point2D {
-  const topX = q[0].x * (1 - u) + q[1].x * u;
-  const topY = q[0].y * (1 - u) + q[1].y * u;
-  const botX = q[3].x * (1 - u) + q[2].x * u;
-  const botY = q[3].y * (1 - u) + q[2].y * u;
-  return {
-    x: topX * (1 - v) + botX * v,
-    y: topY * (1 - v) + botY * v,
-  };
-}
 
 export default function ChladniViewportPage() {
   const router = useRouter();
@@ -73,9 +60,19 @@ export default function ChladniViewportPage() {
   const [isAudioOn, setIsAudioOn] = useState<boolean>(false);
   const [material, setMaterial] = useState<MaterialData>(DEFAULT_MATERIAL);
   const [thicknessMm, setThicknessMm] = useState<number>(1.6);
+  const [plateGeo, setPlateGeo] = useState<{ areaMm2: number; aspectRatio: number }>({
+    areaMm2: 14250,
+    aspectRatio: 1.2,
+  });
   const [quad, setQuad] = useState<Point2D[]>(DEFAULT_QUAD);
 
-  const activeMode = frequencyToMode(frequency, material.acousticSpeedMs, thicknessMm);
+  const activeMode = frequencyToMode(
+    frequency,
+    material,
+    thicknessMm,
+    plateGeo.areaMm2,
+    plateGeo.aspectRatio
+  );
 
   const { isWebGPUSupported, fps, particleCount, mountCanvas, updateParameters } =
     useChladniShader(frequency, activeMode.m, activeMode.n);
@@ -83,6 +80,7 @@ export default function ChladniViewportPage() {
   useEffect(() => {
     setMaterial(getStoredMaterial());
     setThicknessMm(getStoredThickness());
+    setPlateGeo(getStoredPlateGeometry());
     if (typeof window !== "undefined") {
       const savedFreq = Number(localStorage.getItem("harmonix_peak_freq"));
       if (Number.isFinite(savedFreq) && savedFreq >= 200) {
@@ -204,10 +202,10 @@ export default function ChladniViewportPage() {
     const rows = 18;
 
     const evalAmp = (nx: number, ny: number) =>
-      activeMode.m === activeMode.n
-        ? Math.sin(activeMode.m * Math.PI * nx) * Math.sin(activeMode.n * Math.PI * ny) +
-          0.35 * Math.cos(activeMode.m * Math.PI * nx) * Math.cos(activeMode.n * Math.PI * ny)
-        : chladniAmplitude(nx, ny, activeMode.m, activeMode.n);
+      chladniAmplitude(nx, ny, activeMode.m, activeMode.n);
+
+    const H = computeHomography(quad);
+    const gainScale = Math.min(2.2, 0.55 + activeMode.resonanceGain * 0.14);
 
     const draw = () => {
       phase += 0.13;
@@ -228,10 +226,10 @@ export default function ChladniViewportPage() {
         for (let c = 0; c <= cols; c++) {
           const nx = c / cols;
           const w = evalAmp(nx, ny);
-          const zLift = w * osc * (viewMode === "ar" ? 14 : 22);
+          const zLift = w * osc * gainScale * (viewMode === "ar" ? 12 : 18);
 
           if (viewMode === "ar") {
-            const p = projectToQuad(nx, ny, quad);
+            const p = applyHomography(H, nx, ny);
             rowArr.push({ sx: p.x, sy: p.y - zLift, amp: Math.abs(w) });
           } else {
             const cx = nx - 0.5;
@@ -299,10 +297,10 @@ export default function ChladniViewportPage() {
         ctx.closePath();
         ctx.stroke();
 
-        // Sweeping LiDAR scanline across the physical quad
+        // Sweeping LiDAR scanline across the physical quad using projective homography
         const scanV = (Math.sin(phase * 0.5) + 1) * 0.5;
-        const sL = projectToQuad(0, scanV, quad);
-        const sR = projectToQuad(1, scanV, quad);
+        const sL = applyHomography(H, 0, scanV);
+        const sR = applyHomography(H, 1, scanV);
         ctx.strokeStyle = "rgba(56, 189, 248, 0.85)";
         ctx.lineWidth = 2.5;
         ctx.beginPath();
@@ -310,13 +308,13 @@ export default function ChladniViewportPage() {
         ctx.lineTo(sR.x, sR.y);
         ctx.stroke();
 
-        // Floating 3D Spatial Pin Callouts anchored to board coordinates
+        // Floating 3D Spatial Pin Callouts anchored via 3x3 Homography
         const anchors = [
-          { u: 0.5, v: 0.5, label: "XTAL-24M" },
-          { u: 0.25, v: 0.28, label: "MCU-BGA" },
+          { u: 0.5, v: 0.5, label: "CRYSTAL" },
+          { u: 0.25, v: 0.28, label: "CPU-CHIP" },
         ];
         anchors.forEach((a) => {
-          const base = projectToQuad(a.u, a.v, quad);
+          const base = applyHomography(H, a.u, a.v);
           const amp = Math.abs(evalAmp(a.u, a.v));
           const safe = amp < 0.28;
           const color = safe ? "#10B981" : "#EF4444";
@@ -350,7 +348,7 @@ export default function ChladniViewportPage() {
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [viewMode, activeMode.m, activeMode.n, quad, xrayOpacity]);
+  }, [viewMode, activeMode.m, activeMode.n, activeMode.resonanceGain, quad, xrayOpacity]);
 
   const toggleAudioDrive = async () => {
     if (isAudioOn) {
@@ -446,11 +444,17 @@ export default function ChladniViewportPage() {
               </div>
             </div>
 
-            {viewMode === "2d" && (
-              <div className="bg-white/90 dark:bg-[#0D191C]/80 px-2.5 py-1 rounded-[6px] border border-slate-200 dark:border-[#294044] text-[9px] font-mono text-slate-600 dark:text-[#8C999A]">
-                PARTICLES: <span className="font-bold">{particleCount.toLocaleString()}</span> // FPS: <span className="font-bold">{fps}</span>
-              </div>
-            )}
+            <div className="bg-white/90 dark:bg-[#0D191C]/80 px-2.5 py-1 rounded-[6px] border border-slate-200 dark:border-[#294044] text-[9px] font-mono text-slate-600 dark:text-[#8C999A]">
+              {viewMode === "2d" ? (
+                <>
+                  PARTICLES: <span className="font-bold">{particleCount.toLocaleString()}</span> // FPS: <span className="font-bold">{fps}</span>
+                </>
+              ) : (
+                <>
+                  GAIN H(f): <span className="font-bold text-sky-700 dark:text-[#0EB29A]">{activeMode.resonanceGain.toFixed(1)}x</span> // f₀: <span className="font-bold">{activeMode.eigenFreqHz} Hz</span>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Audio Drive Toggle */}

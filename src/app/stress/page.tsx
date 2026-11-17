@@ -2,15 +2,20 @@
 
 import React, { useRef, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Layers,
-  ArrowRight,
-} from "lucide-react";
+import { Layers, ArrowRight } from "lucide-react";
 import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
-import { getStoredActiveMode, getStoredMaterial, getStoredThickness } from "@/utils/physics";
+import {
+  computePlateDimensionsMeters,
+  evalPlateMechanics,
+  getStoredActiveMode,
+  getStoredMaterial,
+  getStoredPlateGeometry,
+  getStoredStandoffs,
+  getStoredThickness,
+} from "@/utils/physics";
 
 export default function StressHeatmapPage() {
   const router = useRouter();
@@ -18,14 +23,28 @@ export default function StressHeatmapPage() {
   const [showMesh, setShowMesh] = useState<boolean>(true);
   const [peakStressMpa, setPeakStressMpa] = useState<number>(84.6);
   const [yieldStrengthMpa, setYieldStrengthMpa] = useState<number>(276.0);
-  const [peakCoords, setPeakCoords] = useState<{ x: number; y: number }>({ x: 182, y: 94 });
+  const [peakCoordsMm, setPeakCoordsMm] = useState<{ x: number; y: number }>({ x: 65, y: 55 });
+  const [peakRelPos, setPeakRelPos] = useState<{ leftPct: number; topPct: number }>({
+    leftPct: 50,
+    topPct: 50,
+  });
   const [modeLabel, setModeLabel] = useState<string>("(2, 2)");
-  const safetyFactor = (yieldStrengthMpa / Math.max(1, peakStressMpa)).toFixed(2);
+
+  const sfNum = yieldStrengthMpa / Math.max(0.1, peakStressMpa);
+  const safetyFactor = sfNum >= 100 ? ">99" : sfNum.toFixed(2);
+  const isSafe = sfNum >= 1.5;
 
   useEffect(() => {
     const mode = getStoredActiveMode();
     const mat = getStoredMaterial();
     const thickness = getStoredThickness();
+    const geo = getStoredPlateGeometry();
+    const standoffs = getStoredStandoffs();
+    const normStandoffs = standoffs.map((s) => ({
+      nx: Math.max(0, Math.min(1, s.x / 360)),
+      ny: Math.max(0, Math.min(1, s.y / 320)),
+    }));
+
     setModeLabel(mode.indices);
     const yieldMpa = mat.yieldStrengthMpa ?? 276.0;
     setYieldStrengthMpa(yieldMpa);
@@ -35,83 +54,106 @@ export default function StressHeatmapPage() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    canvas.width = 340;
-    canvas.height = 340;
+    const W = 170;
+    const H = 170;
+    canvas.width = W;
+    canvas.height = H;
 
-    // Render 2D von Mises bending stress distribution for active (m, n) mode
-    const imgData = ctx.createImageData(canvas.width, canvas.height);
-    const data = imgData.data;
+    // 1. Evaluate exact Kirchhoff-Love von Mises tensor over the 2D plate grid
+    const field = new Float32Array(W * H);
+    let maxVm = 0;
+    let maxX = Math.floor(W / 2);
+    let maxY = Math.floor(H / 2);
 
-    let maxNormStress = 0;
-    let maxX = 170;
-    let maxY = 170;
-
-    for (let y = 0; y < canvas.height; y++) {
-      for (let x = 0; x < canvas.width; x++) {
-        const nx = x / canvas.width;
-        const ny = y / canvas.height;
-
-        // Bending curvature magnitude |d2w/dx2 + d2w/dy2| ~ (m^2 + n^2) * |sin(n*pi*x)*sin(m*pi*y)|
-        const s1 = Math.abs(
-          mode.m === mode.n
-            ? Math.sin(mode.m * Math.PI * nx) * Math.sin(mode.n * Math.PI * ny)
-            : Math.sin(mode.n * Math.PI * nx) * Math.sin(mode.m * Math.PI * ny) -
-                Math.sin(mode.m * Math.PI * nx) * Math.sin(mode.n * Math.PI * ny)
+    for (let y = 0; y < H; y++) {
+      const ny = (y + 0.5) / H;
+      for (let x = 0; x < W; x++) {
+        const nx = (x + 0.5) / W;
+        const mech = evalPlateMechanics(
+          nx,
+          ny,
+          mode.m,
+          mode.n,
+          mat,
+          thickness,
+          geo.areaMm2,
+          geo.aspectRatio,
+          normStandoffs
         );
-        const stress = Math.min(1, s1 * 0.85 + 0.08);
-        if (stress > maxNormStress) {
-          maxNormStress = stress;
+        const vm = mech.vonMisesMpa;
+        field[y * W + x] = vm;
+        if (vm > maxVm) {
+          maxVm = vm;
           maxX = x;
           maxY = y;
         }
-
-        // Color gradient: Cold Blue -> Cyan -> Green -> Yellow -> Red Hotspot
-        let r = 0, g = 0, b = 0;
-        if (stress < 0.25) {
-          r = 13; g = Math.floor(stress * 4 * 120); b = 180;
-        } else if (stress < 0.5) {
-          r = 14; g = Math.floor(120 + (stress - 0.25) * 4 * 135); b = 154;
-        } else if (stress < 0.75) {
-          r = Math.floor((stress - 0.5) * 4 * 245); g = 240; b = 30;
-        } else {
-          r = 255; g = Math.floor(240 - (stress - 0.75) * 4 * 200); b = 30;
-        }
-
-        const idx = (y * canvas.width + x) * 4;
-        data[idx] = r;
-        data[idx + 1] = g;
-        data[idx + 2] = b;
-        data[idx + 3] = 230;
       }
+    }
+
+    // 2. Map physical von Mises stress [MPa] to heatmap spectrum
+    const colorScaleMax = Math.max(1.0, Math.min(yieldMpa, maxVm * 1.05));
+    const imgData = ctx.createImageData(W, H);
+    const data = imgData.data;
+
+    for (let i = 0; i < W * H; i++) {
+      const stress = Math.min(1, field[i] / colorScaleMax);
+      let r = 0,
+        g = 0,
+        b = 0;
+      if (stress < 0.25) {
+        r = 13;
+        g = Math.floor(stress * 4 * 120);
+        b = 180;
+      } else if (stress < 0.5) {
+        r = 14;
+        g = Math.floor(120 + (stress - 0.25) * 4 * 135);
+        b = 154;
+      } else if (stress < 0.75) {
+        r = Math.floor((stress - 0.5) * 4 * 245);
+        g = 240;
+        b = 30;
+      } else {
+        r = 255;
+        g = Math.floor(240 - (stress - 0.75) * 4 * 200);
+        b = 30;
+      }
+      const idx = i * 4;
+      data[idx] = r;
+      data[idx + 1] = g;
+      data[idx + 2] = b;
+      data[idx + 3] = 232;
     }
     ctx.putImageData(imgData, 0, 0);
 
-    // Physical peak stress scaling with Young's modulus, mode order, and thickness
-    const computedPeak = parseFloat(
-      Math.min(
-        yieldMpa * 0.85,
-        (mat.youngsModulusGpa * 1.4 + (mode.m + mode.n) * 9.5) / Math.max(0.6, thickness * 0.7)
-      ).toFixed(1)
-    );
-    setPeakStressMpa(computedPeak);
-    setPeakCoords({ x: Math.round(maxX * 0.7), y: Math.round(maxY * 0.7) });
+    const { a, b } = computePlateDimensionsMeters(geo.areaMm2, geo.aspectRatio);
+    setPeakStressMpa(parseFloat(maxVm.toFixed(1)));
+    setPeakCoordsMm({
+      x: Math.round(((maxX + 0.5) / W) * a * 1000),
+      y: Math.round(((maxY + 0.5) / H) * b * 1000),
+    });
+    setPeakRelPos({
+      leftPct: Math.max(12, Math.min(88, ((maxX + 0.5) / W) * 100)),
+      topPct: Math.max(12, Math.min(88, ((maxY + 0.5) / H) * 100)),
+    });
 
     // Draw FEA Mesh lines if enabled
     if (showMesh) {
-      const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
-      ctx.strokeStyle = isDark ? "rgba(41, 64, 68, 0.4)" : "rgba(255, 255, 255, 0.4)";
-      ctx.lineWidth = 1;
-      const step = 20;
-      for (let x = 0; x <= canvas.width; x += step) {
+      const isDark =
+        typeof document !== "undefined" &&
+        document.documentElement.classList.contains("dark");
+      ctx.strokeStyle = isDark ? "rgba(41, 64, 68, 0.45)" : "rgba(255, 255, 255, 0.45)";
+      ctx.lineWidth = 0.75;
+      const step = 10;
+      for (let x = 0; x <= W; x += step) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
+        ctx.lineTo(x, H);
         ctx.stroke();
       }
-      for (let y = 0; y <= canvas.height; y += step) {
+      for (let y = 0; y <= H; y += step) {
         ctx.beginPath();
         ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
+        ctx.lineTo(W, y);
         ctx.stroke();
       }
     }
@@ -122,11 +164,11 @@ export default function StressHeatmapPage() {
       <HudHeader
         title="STRESS HEATMAP"
         step="SCREEN 08 // 10"
-        subtitle="Dynamic von Mises FEA Stress Tensor"
+        subtitle="Kirchhoff-Love von Mises Tensor"
         backHref="/safety"
         rightAction={
-          <HudBadge variant="safe" dot>
-            SF: {safetyFactor}X (SAFE)
+          <HudBadge variant={isSafe ? "safe" : "danger"} dot>
+            SF: {safetyFactor}X ({isSafe ? "SAFE" : "RISK"})
           </HudBadge>
         }
       />
@@ -136,11 +178,18 @@ export default function StressHeatmapPage() {
         <div className="relative w-full aspect-square bg-slate-100 dark:bg-[#101F23] rounded-[16px] border border-slate-300 dark:border-[#294044] overflow-hidden flex items-center justify-center shadow-md dark:shadow-xl">
           <canvas ref={canvasRef} className="w-full h-full object-cover" />
 
-          {/* Hotspot Reticle Marker */}
-          <div className="absolute top-[32%] right-[38%] pointer-events-none flex flex-col items-center">
+          {/* Dynamic Hotspot Reticle Marker anchored to computed stress maximum */}
+          <div
+            style={{
+              left: `${peakRelPos.leftPct}%`,
+              top: `${peakRelPos.topPct}%`,
+              transform: "translate(-50%, -50%)",
+            }}
+            className="absolute pointer-events-none flex flex-col items-center z-10"
+          >
             <div className="w-6 h-6 rounded-full border-2 border-red-500 animate-ping" />
             <div className="w-2.5 h-2.5 rounded-full bg-red-600 absolute top-1.5" />
-            <div className="bg-white/95 dark:bg-[#0D191C]/90 px-2 py-0.5 rounded border border-red-500 text-[9px] font-mono text-red-700 dark:text-[#FF8888] font-bold mt-1 shadow-xs">
+            <div className="bg-white/95 dark:bg-[#0D191C]/90 px-2 py-0.5 rounded border border-red-500 text-[9px] font-mono text-red-700 dark:text-[#FF8888] font-bold mt-1 shadow-xs whitespace-nowrap">
               PEAK: {peakStressMpa} MPa ({modeLabel})
             </div>
           </div>
@@ -166,10 +215,10 @@ export default function StressHeatmapPage() {
         {/* Heatmap Spectrum Gradient Legend */}
         <div className="p-3 bg-white dark:bg-[#15282C] rounded-[12px] border border-slate-200 dark:border-[#294044] space-y-1.5 shadow-sm">
           <div className="flex justify-between text-[10px] font-mono text-slate-600 dark:text-[#8C999A]">
-            <span>0 MPa (MIN)</span>
-            <span className="text-sky-700 dark:text-[#0EB29A]">50 MPa</span>
-            <span className="text-amber-600 dark:text-[#F5C518]">150 MPa</span>
-            <span className="text-red-600 dark:text-[#FF4444]">276 MPa (YIELD)</span>
+            <span>0 MPa</span>
+            <span className="text-sky-700 dark:text-[#0EB29A]">{(peakStressMpa * 0.35).toFixed(1)} MPa</span>
+            <span className="text-amber-600 dark:text-[#F5C518]">{(peakStressMpa * 0.7).toFixed(1)} MPa</span>
+            <span className="text-red-600 dark:text-[#FF4444]">{yieldStrengthMpa.toFixed(0)} MPa (YIELD)</span>
           </div>
           <div className="w-full h-3 rounded-full bg-gradient-to-r from-blue-900 via-sky-500 via-emerald-400 via-yellow-400 to-red-500 border border-slate-300 dark:border-[#233A3D]" />
         </div>
@@ -180,13 +229,17 @@ export default function StressHeatmapPage() {
             <div className="p-2.5 bg-slate-50 dark:bg-[#101F23] rounded-[8px] border border-slate-200 dark:border-[#233A3D]">
               <span className="text-slate-500 dark:text-[#8C999A] block text-[10px]">PEAK CONCENTRATION</span>
               <span className="text-slate-900 dark:text-[#F5FDFF] font-bold text-sm">{peakStressMpa} MPa</span>
-              <span className="text-[9px] text-slate-500 dark:text-[#8C999A] block mt-0.5">@ X:{peakCoords.x}mm, Y:{peakCoords.y}mm</span>
+              <span className="text-[9px] text-slate-500 dark:text-[#8C999A] block mt-0.5">
+                @ X:{peakCoordsMm.x}mm, Y:{peakCoordsMm.y}mm
+              </span>
             </div>
 
             <div className="p-2.5 bg-slate-50 dark:bg-[#101F23] rounded-[8px] border border-slate-200 dark:border-[#233A3D]">
               <span className="text-slate-500 dark:text-[#8C999A] block text-[10px]">ALLOWABLE YIELD (σ_y)</span>
               <span className="text-emerald-700 dark:text-[#4ADE80] font-bold text-sm">{yieldStrengthMpa.toFixed(1)} MPa</span>
-              <span className="text-[9px] text-sky-700 dark:text-[#DDF0C2] block mt-0.5 font-semibold">SAFETY FACTOR: {safetyFactor}x</span>
+              <span className="text-[9px] text-sky-700 dark:text-[#DDF0C2] block mt-0.5 font-semibold">
+                SAFETY FACTOR: {safetyFactor}x
+              </span>
             </div>
           </div>
         </ChamferedCard>

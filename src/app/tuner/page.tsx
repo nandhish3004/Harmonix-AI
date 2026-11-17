@@ -49,8 +49,11 @@ export default function AudioPitchTunerPage() {
 
   useEffect(() => {
     setTargetResonance(targetFrequency, 12);
-    const diff = frequency - targetFrequency;
-    setDetuneCents(Math.min(50, Math.max(-50, Math.round(diff * 1.8))));
+    const cents =
+      frequency > 0 && targetFrequency > 0
+        ? Math.round(1200 * Math.log2(frequency / targetFrequency))
+        : 0;
+    setDetuneCents(Math.min(50, Math.max(-50, cents)));
     if (oscRef.current && toneCtxRef.current) {
       oscRef.current.frequency.setValueAtTime(targetFrequency, toneCtxRef.current.currentTime);
     }
@@ -144,29 +147,47 @@ export default function AudioPitchTunerPage() {
           `HuggingFace AST locked ${aiRes.peak_hz} Hz • ${aiRes.ast_top_class} (${Math.round(aiRes.ast_confidence * 100)}%)`
         );
       } else {
-        // Real in-browser Goertzel/DFT peak frequency scan (100..2500 Hz)
+        // Real in-browser Hann-windowed DFT peak + -3dB bandwidth Q-factor extraction
         const slice = samples.slice(0, 2048);
-        let bestFreq = targetFrequency;
-        let bestMag = -1;
-        for (let f = 120; f <= 2400; f += 15) {
+        const spectrum: { f: number; power: number }[] = [];
+        let bestIdx = 0;
+        let bestPower = -1;
+        const nLen = slice.length;
+
+        for (let f = 100; f <= 2400; f += 10) {
           let re = 0;
           let im = 0;
           const w = (2 * Math.PI * f) / sampleRate;
-          for (let i = 0; i < slice.length; i += 2) {
-            re += slice[i] * Math.cos(w * i);
-            im -= slice[i] * Math.sin(w * i);
+          for (let i = 0; i < nLen; i += 2) {
+            const hann = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (nLen - 1)));
+            const v = slice[i] * hann;
+            re += v * Math.cos(w * i);
+            im -= v * Math.sin(w * i);
           }
-          const mag = re * re + im * im;
-          if (mag > bestMag) {
-            bestMag = mag;
-            bestFreq = f;
+          const power = re * re + im * im;
+          if (power > bestPower) {
+            bestPower = power;
+            bestIdx = spectrum.length;
           }
+          spectrum.push({ f, power });
         }
+
+        const bestFreq = spectrum[bestIdx]?.f ?? targetFrequency;
+        const halfPower = bestPower * 0.5; // -3dB power threshold
+        let leftIdx = bestIdx;
+        while (leftIdx > 0 && spectrum[leftIdx].power > halfPower) leftIdx--;
+        let rightIdx = bestIdx;
+        while (rightIdx < spectrum.length - 1 && spectrum[rightIdx].power > halfPower) rightIdx++;
+
+        const bwHz = Math.max(10, (spectrum[rightIdx]?.f ?? bestFreq) - (spectrum[leftIdx]?.f ?? bestFreq));
+        const qExp = Math.max(5, Math.round(bestFreq / bwHz));
+
         setTargetFrequency(bestFreq);
         if (typeof window !== "undefined") {
           localStorage.setItem("harmonix_measured_freq", String(bestFreq));
+          localStorage.setItem("harmonix_measured_q", String(qExp));
         }
-        setTapSummary(`Tap-Test FFT locked peak at ${bestFreq} Hz.`);
+        setTapSummary(`Tap-Test FFT: f₀ = ${bestFreq} Hz // Δf(-3dB) = ${bwHz} Hz // Q ≈ ${qExp}`);
       }
     } finally {
       setIsTapTesting(false);
