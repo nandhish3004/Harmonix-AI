@@ -152,85 +152,159 @@ function detectQuadFromSource(
   }
 
   const meanMag = sumMag / total;
-  const threshold = Math.max(55, meanMag * 2.4);
+  const threshold = Math.max(68, meanMag * 2.7);
 
-  // 4. Extremal quad corner detection on strong edge pixels
-  let minSum = Infinity, maxSum = -Infinity;
-  let minDiff = Infinity, maxDiff = -Infinity;
-  let p1x = 0, p1y = 0; // Top-Left: min(x+y)
-  let p2x = 0, p2y = 0; // Top-Right: max(x-y)
-  let p3x = 0, p3y = 0; // Bottom-Right: max(x+y)
-  let p4x = 0, p4y = 0; // Bottom-Left: min(x-y)
+  // 4. Build binary edge mask (dilated 1px) so broken object borders connect cleanly
+  const edgeMask = new Uint8Array(total);
+  const dilated = new Uint8Array(total);
   let edgeCount = 0;
-
-  let overlayData: ImageData | null = null;
-  let overlayCtx: CanvasRenderingContext2D | null = null;
-  if (overlayCanvas) {
-    overlayCanvas.width = procW;
-    overlayCanvas.height = procH;
-    overlayCtx = overlayCanvas.getContext("2d");
-    if (overlayCtx) {
-      overlayData = overlayCtx.createImageData(procW, procH);
-    }
-  }
-
   for (let y = margin; y < procH - margin; y++) {
     for (let x = margin; x < procW - margin; x++) {
       const i = y * procW + x;
       if (mag[i] >= threshold) {
+        edgeMask[i] = 1;
         edgeCount++;
-        const s = x + y;
-        const d = x - y;
-        if (s < minSum) { minSum = s; p1x = x; p1y = y; }
-        if (d > maxDiff) { maxDiff = d; p2x = x; p2y = y; }
-        if (s > maxSum) { maxSum = s; p3x = x; p3y = y; }
-        if (d < minDiff) { minDiff = d; p4x = x; p4y = y; }
-
-        if (overlayData) {
-          const oIdx = i * 4;
-          overlayData.data[oIdx] = 14;
-          overlayData.data[oIdx + 1] = 178;
-          overlayData.data[oIdx + 2] = 154;
-          overlayData.data[oIdx + 3] = Math.min(220, Math.round((mag[i] / Math.max(1, maxMag)) * 255));
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            dilated[(y + dy) * procW + (x + dx)] = 1;
+          }
         }
       }
     }
   }
 
-  if (overlayCtx && overlayData) {
-    overlayCtx.putImageData(overlayData, 0, 0);
+  if (edgeCount < 30) {
+    return { corners: null, confidence: Math.min(25, edgeCount) };
   }
 
-  if (edgeCount < 35) {
-    return { corners: null, confidence: Math.min(30, edgeCount) };
+  // 5. Connected-component labeling (BFS) to isolate foreground workpiece from room/tile background
+  const visited = new Uint8Array(total);
+  const cxFrame = procW * 0.5;
+  const cyFrame = procH * 0.5;
+  const queue = new Int32Array(total);
+
+  let bestScore = -1;
+  let bestCorners: Point2D[] | null = null;
+  let bestPixels: number[] = [];
+
+  for (let y = margin; y < procH - margin; y++) {
+    for (let x = margin; x < procW - margin; x++) {
+      const start = y * procW + x;
+      if (!dilated[start] || visited[start]) continue;
+
+      let head = 0;
+      let tail = 0;
+      queue[tail++] = start;
+      visited[start] = 1;
+
+      const compPixels: number[] = [];
+      let minX = procW, maxX = 0, minY = procH, maxY = 0;
+      let sumX = 0, sumY = 0;
+      let minSum = Infinity, maxSum = -Infinity;
+      let minDiff = Infinity, maxDiff = -Infinity;
+      let p1x = 0, p1y = 0, p2x = 0, p2y = 0, p3x = 0, p3y = 0, p4x = 0, p4y = 0;
+
+      while (head < tail) {
+        const idx = queue[head++];
+        const px = idx % procW;
+        const py = (idx - px) / procW;
+
+        if (edgeMask[idx]) {
+          compPixels.push(idx);
+          sumX += px;
+          sumY += py;
+          if (px < minX) minX = px;
+          if (px > maxX) maxX = px;
+          if (py < minY) minY = py;
+          if (py > maxY) maxY = py;
+
+          const s = px + py;
+          const d = px - py;
+          if (s < minSum) { minSum = s; p1x = px; p1y = py; }
+          if (d > maxDiff) { maxDiff = d; p2x = px; p2y = py; }
+          if (s > maxSum) { maxSum = s; p3x = px; p3y = py; }
+          if (d < minDiff) { minDiff = d; p4x = px; p4y = py; }
+        }
+
+        // 8-neighbors
+        for (let dy = -1; dy <= 1; dy++) {
+          const ny = py + dy;
+          if (ny < margin || ny >= procH - margin) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = px + dx;
+            if (nx < margin || nx >= procW - margin) continue;
+            const nIdx = ny * procW + nx;
+            if (dilated[nIdx] && !visited[nIdx]) {
+              visited[nIdx] = 1;
+              queue[tail++] = nIdx;
+            }
+          }
+        }
+      }
+
+      if (compPixels.length < 28) continue;
+      const bw = maxX - minX;
+      const bh = maxY - minY;
+      const boxArea = bw * bh;
+      const frameArea = procW * procH;
+      // Reject tiny noise or full-frame background spans (> 78% of frame)
+      if (boxArea < frameArea * 0.04 || boxArea > frameArea * 0.78) continue;
+
+      const centroidX = sumX / compPixels.length;
+      const centroidY = sumY / compPixels.length;
+      const distToCenter = Math.hypot(centroidX - cxFrame, centroidY - cyFrame) / Math.hypot(cxFrame, cyFrame);
+      const centrality = Math.max(0.15, 1.0 - distToCenter * 1.15);
+      const score = compPixels.length * centrality;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestPixels = compPixels;
+        const scaleX = targetWidth / procW;
+        const scaleY = targetHeight / procH;
+        bestCorners = [
+          { x: Math.round(p1x * scaleX), y: Math.round(p1y * scaleY), label: "P1" },
+          { x: Math.round(p2x * scaleX), y: Math.round(p2y * scaleY), label: "P2" },
+          { x: Math.round(p3x * scaleX), y: Math.round(p3y * scaleY), label: "P3" },
+          { x: Math.round(p4x * scaleX), y: Math.round(p4y * scaleY), label: "P4" },
+        ];
+      }
+    }
   }
 
-  // Map back to viewport coordinates
-  const scaleX = targetWidth / procW;
-  const scaleY = targetHeight / procH;
-
-  const detected: Point2D[] = [
-    { x: Math.round(p1x * scaleX), y: Math.round(p1y * scaleY), label: "P1" },
-    { x: Math.round(p2x * scaleX), y: Math.round(p2y * scaleY), label: "P2" },
-    { x: Math.round(p3x * scaleX), y: Math.round(p3y * scaleY), label: "P3" },
-    { x: Math.round(p4x * scaleX), y: Math.round(p4y * scaleY), label: "P4" },
-  ];
-
-  // Validate area (at least 6% of viewport)
-  let area = 0;
-  for (let i = 0; i < 4; i++) {
-    const j = (i + 1) % 4;
-    area += detected[i].x * detected[j].y - detected[j].x * detected[i].y;
+  // Render overlay highlighting the locked foreground object edges
+  if (overlayCanvas) {
+    overlayCanvas.width = procW;
+    overlayCanvas.height = procH;
+    const overlayCtx = overlayCanvas.getContext("2d");
+    if (overlayCtx) {
+      const overlayData = overlayCtx.createImageData(procW, procH);
+      for (let i = 0; i < total; i++) {
+        if (edgeMask[i]) {
+          const oIdx = i * 4;
+          overlayData.data[oIdx] = 14;
+          overlayData.data[oIdx + 1] = 178;
+          overlayData.data[oIdx + 2] = 154;
+          overlayData.data[oIdx + 3] = 95;
+        }
+      }
+      for (const idx of bestPixels) {
+        const oIdx = idx * 4;
+        overlayData.data[oIdx] = 52;
+        overlayData.data[oIdx + 1] = 211;
+        overlayData.data[oIdx + 2] = 153;
+        overlayData.data[oIdx + 3] = 245;
+      }
+      overlayCtx.putImageData(overlayData, 0, 0);
+    }
   }
-  area = Math.abs(area) * 0.5;
-  const viewportArea = targetWidth * targetHeight;
 
-  if (area < viewportArea * 0.06) {
-    return { corners: null, confidence: 25 };
+  if (!bestCorners) {
+    return { corners: null, confidence: 28 };
   }
 
-  const confidence = Math.min(99, Math.round(55 + (edgeCount / total) * 450));
-  return { corners: detected, confidence };
+  const confidence = Math.min(99, Math.round(62 + (bestPixels.length / total) * 520));
+  return { corners: bestCorners, confidence };
 }
 
 export function useBoundaryDetection(): BoundaryDetectionState {
