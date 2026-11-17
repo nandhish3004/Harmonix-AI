@@ -39,7 +39,7 @@ export const HudNav: React.FC = () => {
   }
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-[#0D191C]/95 backdrop-blur-lg border-t border-[#294044] px-2 py-2">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 dark:bg-[#0D191C]/95 backdrop-blur-lg border-t border-slate-200 dark:border-[#294044] px-2 py-2 transition-colors duration-200">
       <div className="max-w-[440px] mx-auto flex items-center justify-between overflow-x-auto no-scrollbar gap-1 px-1">
         {PIPELINE_STEPS.map((step) => {
           const Icon = step.icon;
@@ -51,11 +51,16 @@ export const HudNav: React.FC = () => {
               className={clsx(
                 "flex flex-col items-center justify-center min-w-[54px] py-1 px-1 rounded-[8px] transition-all duration-150 select-none",
                 isActive
-                  ? "bg-[#1C332E] text-[#0EB29A] border border-[#0EB29A]/40 shadow-[0_0_10px_rgba(14,178,154,0.2)]"
-                  : "text-[#8C999A] hover:text-[#F5FDFF] hover:bg-[#15282C]"
+                  ? "bg-sky-50 text-sky-700 border border-sky-300 shadow-sm dark:bg-[#1C332E] dark:text-[#0EB29A] dark:border-[#0EB29A]/40 dark:shadow-[0_0_10px_rgba(14,178,154,0.2)]"
+                  : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-[#8C999A] dark:hover:text-[#F5FDFF] dark:hover:bg-[#15282C]"
               )}
             >
-              <Icon className={clsx("w-4 h-4 mb-0.5", isActive ? "text-[#0EB29A]" : "text-[#8C999A]")} />
+              <Icon
+                className={clsx(
+                  "w-4 h-4 mb-0.5",
+                  isActive ? "text-sky-600 dark:text-[#0EB29A]" : "text-slate-400 dark:text-[#8C999A]"
+                )}
+              />
               <span className="text-[9px] font-mono whitespace-nowrap uppercase tracking-tighter">
                 {step.label.slice(0, 5)}
               </span>
@@ -66,4 +71,3 @@ export const HudNav: React.FC = () => {
     </nav>
   );
 };
-

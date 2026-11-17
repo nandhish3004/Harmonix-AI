@@ -3,13 +3,8 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Grid,
   Check,
-  Zap,
-  Activity,
   ArrowRight,
-  Shield,
-  Layers,
 } from "lucide-react";
 import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
@@ -104,7 +99,7 @@ export default function HarmonicModesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0D191C] flex flex-col">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0D191C] flex flex-col transition-colors duration-200">
       <HudHeader
         title="HARMONIC GALLERY"
         step="SCREEN 06 // 10"
@@ -119,10 +114,10 @@ export default function HarmonicModesPage() {
 
       <div className="p-4 space-y-4 flex-1 flex flex-col">
         <div>
-          <span className="text-xs font-mono text-[#8C999A] uppercase tracking-wider block mb-1">
+          <span className="text-xs font-mono text-slate-600 dark:text-[#8C999A] uppercase tracking-wider block mb-1 font-semibold">
             EIGENVALUE NODAL EQUATIONS
           </span>
-          <p className="text-xs font-mono text-[#8C999A]">
+          <p className="text-xs font-mono text-slate-600 dark:text-[#8C999A]">
             Select mode shape to test mechanical placement boundaries and isolate component shear stress.
           </p>
         </div>
@@ -140,50 +135,50 @@ export default function HarmonicModesPage() {
               >
                 <ChamferedCard
                   variant={isSelected ? "active" : "default"}
-                  className={`p-3 border flex flex-col justify-between h-[180px] transition-all ${
-                    isSelected
-                      ? "border-[#0EB29A] bg-[#1C332E] shadow-[0_0_15px_rgba(14,178,154,0.25)]"
-                      : "border-[#294044] bg-[#15282C] hover:border-[#3E5556]"
-                  }`}
+                  className="p-3 border flex flex-col justify-between h-[180px] transition-all"
                 >
                   <div className="flex items-start justify-between">
                     <div>
-                      <div className="text-[10px] font-mono tracking-widest text-[#0EB29A] font-bold">
+                      <div className="text-[10px] font-mono tracking-widest text-sky-600 dark:text-[#0EB29A] font-bold">
                         MODE {mode.indices}
                       </div>
-                      <div className="text-xs font-mono font-bold text-[#F5FDFF] truncate max-w-[110px]">
+                      <div className="text-xs font-mono font-bold text-slate-900 dark:text-[#F5FDFF] truncate max-w-[110px]">
                         {mode.name}
                       </div>
                     </div>
                     {isSelected && (
-                      <div className="w-4 h-4 rounded-full bg-[#0EB29A] flex items-center justify-center text-[#0D191C]">
+                      <div className="w-4 h-4 rounded-full bg-sky-600 dark:bg-[#0EB29A] flex items-center justify-center text-white dark:text-[#0D191C]">
                         <Check className="w-2.5 h-2.5 stroke-[3]" />
                       </div>
                     )}
                   </div>
 
                   {/* SVG Chladni Nodal Shape Thumbnail */}
-                  <div className="w-full h-16 my-1 bg-[#101F23] rounded-[8px] border border-[#233A3D] flex items-center justify-center p-1 relative overflow-hidden">
+                  <div className="w-full h-16 my-1 bg-slate-100 dark:bg-[#101F23] rounded-[8px] border border-slate-200 dark:border-[#233A3D] flex items-center justify-center p-1 relative overflow-hidden">
                     <svg viewBox="0 0 100 100" className="w-full h-full">
                       <rect width="100" height="100" fill="transparent" />
                       <path
                         d={mode.svgPath}
-                        stroke={isSelected ? "#DDF0C2" : "#0EB29A"}
+                        className={
+                          isSelected
+                            ? "stroke-sky-600 dark:stroke-[#DDF0C2]"
+                            : "stroke-slate-700 dark:stroke-[#0EB29A]"
+                        }
                         strokeWidth="3"
                         strokeLinecap="round"
                         fill="none"
                       />
                     </svg>
                     {mode.isPeakResonance && (
-                      <span className="absolute bottom-1 right-1 text-[8px] font-mono bg-[#0EB29A] text-[#0D191C] px-1 rounded font-bold">
+                      <span className="absolute bottom-1 right-1 text-[8px] font-mono bg-sky-600 text-white dark:bg-[#0EB29A] dark:text-[#0D191C] px-1 rounded font-bold">
                         PEAK
                       </span>
                     )}
                   </div>
 
-                  <div className="flex items-center justify-between text-[10px] font-mono border-t border-[#294044]/60 pt-1.5">
-                    <span className="text-[#DDF0C2] font-bold">{mode.freqHz} Hz</span>
-                    <span className="text-[#8C999A]">Q: {mode.qFactor}</span>
+                  <div className="flex items-center justify-between text-[10px] font-mono border-t border-slate-200 dark:border-[#294044]/60 pt-1.5">
+                    <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">{mode.freqHz} Hz</span>
+                    <span className="text-slate-500 dark:text-[#8C999A]">Q: {mode.qFactor}</span>
                   </div>
                 </ChamferedCard>
               </button>
@@ -192,19 +187,19 @@ export default function HarmonicModesPage() {
         </div>
 
         {/* Selected Mode Summary Card */}
-        <ChamferedCard className="p-3.5 bg-[#15282C] border-[#294044] space-y-1.5">
+        <ChamferedCard className="p-3.5 space-y-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-mono text-[#8C999A] uppercase tracking-wider">
+            <span className="text-[11px] font-mono text-slate-500 dark:text-[#8C999A] uppercase tracking-wider font-semibold">
               ACTIVE SELECTION
             </span>
-            <span className="text-xs font-mono font-bold text-[#0EB29A]">
+            <span className="text-xs font-mono font-bold text-sky-700 dark:text-[#0EB29A]">
               MODE {selectedMode.indices} @ {selectedMode.freqHz} HZ
             </span>
           </div>
-          <div className="text-xs font-mono text-[#F5FDFF]">
+          <div className="text-xs font-mono text-slate-900 dark:text-[#F5FDFF]">
             {selectedMode.name} — {selectedMode.type}
           </div>
-          <div className="text-[10px] font-mono text-[#8C999A]">
+          <div className="text-[10px] font-mono text-slate-500 dark:text-[#8C999A]">
             Zero-displacement nodal lines ready for high-reliability component placement.
           </div>
         </ChamferedCard>
@@ -226,4 +221,3 @@ export default function HarmonicModesPage() {
     </div>
   );
 }
-

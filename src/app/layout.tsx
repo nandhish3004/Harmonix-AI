@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { JetBrains_Mono, Inter } from "next/font/google";
 import "./globals.css";
 import { HudNav } from "@/components/ui/HudNav";
+import { ThemeProvider } from "@/components/theme-provider";
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
@@ -24,16 +25,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
       <body
-        className={`${jetbrainsMono.variable} ${inter.variable} min-h-screen bg-[#0D191C] text-[#F5FDFF] flex justify-center`}
+        className={`${jetbrainsMono.variable} ${inter.variable} min-h-screen bg-slate-50 dark:bg-[#0D191C] text-slate-900 dark:text-[#F5FDFF] flex justify-center transition-colors duration-200`}
       >
-        <div className="w-full max-w-[440px] min-h-screen bg-[#0D191C] border-x border-[#294044]/50 flex flex-col relative shadow-2xl">
-          <main className="flex-1 pb-16">{children}</main>
-          <HudNav />
-        </div>
+        <ThemeProvider defaultTheme="light" attribute="class" enableSystem={false}>
+          <div className="w-full max-w-[440px] min-h-screen bg-white dark:bg-[#0D191C] border-x border-slate-200 dark:border-[#294044]/50 flex flex-col relative shadow-xl">
+            <main className="flex-1 pb-16">{children}</main>
+            <HudNav />
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   );
 }
-

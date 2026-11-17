@@ -1,21 +1,27 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   ShieldCheck,
   AlertTriangle,
-  Move,
   Cpu,
-  Zap,
   ArrowRight,
-  Info,
-  CheckCircle2,
+  RotateCcw,
+  PlusCircle,
 } from "lucide-react";
 import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
+import { chladniAmplitude, getStoredActiveMode } from "@/utils/physics";
+import { computePinnModal } from "@/utils/aiClient";
+
+interface StandoffItem {
+  id: string;
+  x: number;
+  y: number;
+}
 
 interface ComponentItem {
   id: string;
@@ -26,52 +32,118 @@ interface ComponentItem {
   sensitivity: "HIGH" | "CRITICAL" | "MEDIUM";
 }
 
+const INITIAL_COMPONENTS: ComponentItem[] = [
+  { id: "comp-1", name: "24MHz Crystal Oscillator", tag: "XTAL-24M", x: 180, y: 160, sensitivity: "CRITICAL" },
+  { id: "comp-2", name: "BGA Microcontroller", tag: "MCU-BGA-144", x: 95, y: 95, sensitivity: "HIGH" },
+  { id: "comp-3", name: "100uF MLCC Cap", tag: "C-1206-MLCC", x: 265, y: 240, sensitivity: "HIGH" },
+];
+
 export default function ComponentSafetyPage() {
   const router = useRouter();
   const boardRef = useRef<HTMLDivElement | null>(null);
+  const nodalCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const [components, setComponents] = useState<ComponentItem[]>([
-    {
-      id: "comp-1",
-      name: "24MHz Crystal Oscillator",
-      tag: "XTAL-24M",
-      x: 180,
-      y: 180, // initially on center node
-      sensitivity: "CRITICAL",
-    },
-    {
-      id: "comp-2",
-      name: "BGA Microcontroller",
-      tag: "MCU-BGA-144",
-      x: 80,
-      y: 90,
-      sensitivity: "HIGH",
-    },
-    {
-      id: "comp-3",
-      name: "100uF MLCC Cap",
-      tag: "C-1206-MLCC",
-      x: 270,
-      y: 260,
-      sensitivity: "HIGH",
-    },
-  ]);
-
+  const [mode, setMode] = useState({ m: 2, n: 2, indices: "(2, 2)", freqHz: 740 });
+  const [components, setComponents] = useState<ComponentItem[]>(INITIAL_COMPONENTS);
+  const [standoffs, setStandoffs] = useState<StandoffItem[]>([]);
+  const [isAddingStandoff, setIsAddingStandoff] = useState<boolean>(false);
+  const [pinnActive, setPinnActive] = useState<boolean>(false);
   const [selectedCompId, setSelectedCompId] = useState<string>("comp-1");
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [boardSize, setBoardSize] = useState({ w: 360, h: 320 });
 
-  const activeComp =
-    components.find((c) => c.id === selectedCompId) || components[0];
+  useEffect(() => {
+    const active = getStoredActiveMode();
+    setMode({ m: active.m, n: active.n, indices: active.indices, freqHz: active.freqHz });
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("harmonix_components");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) setComponents(parsed);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
 
-  // Calculate distance to closest nodal line
-  // In Mode (2,2) Radial Cross on 360x360 board, nodal lines are along x=180, y=180, and diagonal circles
-  const distToNodeX = Math.abs(activeComp.x - 180);
-  const distToNodeY = Math.abs(activeComp.y - 180);
-  const minDistance = Math.min(distToNodeX, distToNodeY);
+  // Evaluate amplitude at normalized (nx, ny) including virtual standoff clamping
+  const evalWithStandoffs = (nx: number, ny: number) => {
+    let amp = Math.abs(
+      mode.m === mode.n
+        ? Math.sin(mode.m * Math.PI * nx) * Math.sin(mode.n * Math.PI * ny) +
+            0.35 * Math.cos(mode.m * Math.PI * nx) * Math.cos(mode.n * Math.PI * ny)
+        : chladniAmplitude(nx, ny, mode.m, mode.n)
+    );
+    for (const pin of standoffs) {
+      const pnx = pin.x / boardSize.w;
+      const pny = pin.y / boardSize.h;
+      const dist2 = (nx - pnx) ** 2 + (ny - pny) ** 2;
+      amp *= 1 - Math.exp(-dist2 / 0.018);
+    }
+    return amp;
+  };
 
-  // Vibration score: 100 on nodal line, drops as distance increases towards antinode
-  const vibrationScore = Math.max(10, Math.min(99, Math.round(100 - minDistance * 0.95)));
+  // Render real Chladni nodal safe corridors on background canvas (with standoffs + optional PyTorch PINN)
+  useEffect(() => {
+    const canvas = nodalCanvasRef.current;
+    const board = boardRef.current;
+    if (!canvas || !board) return;
+    const rect = board.getBoundingClientRect();
+    const w = Math.max(200, Math.round(rect.width));
+    const h = Math.max(200, Math.round(rect.height));
+    setBoardSize({ w, h });
+    canvas.width = w;
+    canvas.height = h;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const img = ctx.createImageData(w, h);
+    const data = img.data;
+
+    for (let y = 0; y < h; y++) {
+      const ny = y / h;
+      for (let x = 0; x < w; x++) {
+        const nx = x / w;
+        const amp = evalWithStandoffs(nx, ny);
+        const idx = (y * w + x) * 4;
+        if (amp < 0.16) {
+          data[idx] = 16;
+          data[idx + 1] = 185;
+          data[idx + 2] = 129;
+          data[idx + 3] = Math.round((1 - amp / 0.16) * 110);
+        } else if (amp > 0.75) {
+          data[idx] = 239;
+          data[idx + 1] = 68;
+          data[idx + 2] = 68;
+          data[idx + 3] = Math.round(((amp - 0.75) / 1.25) * 65);
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+
+    // Ping PyTorch ModalPINNSurrogate when standoffs are placed
+    if (standoffs.length > 0) {
+      computePinnModal(
+        mode.m,
+        mode.n,
+        standoffs.map((s) => ({ nx: s.x / w, ny: s.y / h }))
+      ).then((res) => setPinnActive(Boolean(res)));
+    }
+  }, [mode.m, mode.n, standoffs]);
+
+  const computeScore = (comp: ComponentItem) => {
+    const nx = Math.max(0, Math.min(1, comp.x / boardSize.w));
+    const ny = Math.max(0, Math.min(1, comp.y / boardSize.h));
+    const amp = evalWithStandoffs(nx, ny);
+    return Math.max(8, Math.min(99, Math.round(100 - amp * 68)));
+  };
+
+  const activeComp = components.find((c) => c.id === selectedCompId) || components[0];
+  const vibrationScore = computeScore(activeComp);
   const isSafe = vibrationScore >= 70;
+  const nodalOffsetMm = ((100 - vibrationScore) * 0.42).toFixed(1);
 
   const handlePointerDown = (id: string) => {
     setSelectedCompId(id);
@@ -97,42 +169,75 @@ export default function ComponentSafetyPage() {
     if (typeof window !== "undefined") {
       localStorage.setItem("harmonix_safety_score", String(vibrationScore));
       localStorage.setItem("harmonix_components", JSON.stringify(components));
+      localStorage.setItem("harmonix_standoffs", JSON.stringify(standoffs));
     }
     router.push("/stress");
   };
 
+  const handleBoardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isAddingStandoff || !boardRef.current) return;
+    const rect = boardRef.current.getBoundingClientRect();
+    const x = Math.round(Math.max(15, Math.min(rect.width - 15, e.clientX - rect.left)));
+    const y = Math.round(Math.max(15, Math.min(rect.height - 15, e.clientY - rect.top)));
+    setStandoffs((prev) => [...prev, { id: `pin-${Date.now()}`, x, y }]);
+    setIsAddingStandoff(false);
+  };
+
   return (
-    <div className="min-h-screen bg-[#0D191C] flex flex-col select-none">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0D191C] flex flex-col select-none transition-colors duration-200">
       <HudHeader
         title="SAFETY SCORING"
         step="SCREEN 07 // 10"
-        subtitle="Component Nodal Placement & Fatigue Risk"
+        subtitle={`Mode ${mode.indices} @ ${mode.freqHz} Hz`}
         backHref="/modes"
         rightAction={
-          <HudBadge variant={isSafe ? "safe" : "danger"} dot>
-            {isSafe ? "LOW FATIGUE RISK" : "CRITICAL ANTINODE"}
-          </HudBadge>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setIsAddingStandoff((v) => !v)}
+              className={`px-2 h-8 flex items-center gap-1 rounded-[8px] border text-[10px] font-mono font-bold ${
+                isAddingStandoff
+                  ? "bg-sky-600 text-white border-sky-600 dark:bg-[#0EB29A] dark:text-[#0D191C]"
+                  : "bg-slate-100 dark:bg-[#15282C] border-slate-200 dark:border-[#294044] text-slate-700 dark:text-[#DDF0C2]"
+              }`}
+              title="Tap board to add a virtual standoff screw"
+            >
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>{isAddingStandoff ? "TAP BOARD" : "+ STANDOFF"}</span>
+            </button>
+            <button
+              onClick={() => {
+                setComponents(INITIAL_COMPONENTS);
+                setStandoffs([]);
+              }}
+              className="w-8 h-8 flex items-center justify-center rounded-[8px] bg-slate-100 dark:bg-[#15282C] border border-slate-200 dark:border-[#294044] text-slate-600 dark:text-[#8C999A]"
+              title="Reset Positions & Standoffs"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+            <HudBadge variant={isSafe ? "safe" : "danger"} dot>
+              {isSafe ? "LOW RISK" : "ANTINODE"}
+            </HudBadge>
+          </div>
         }
       />
 
       <div className="p-4 space-y-4 flex-1 flex flex-col">
-        {/* Real-time Green / Red Score Gauge Bar */}
         <ChamferedCard
           variant={isSafe ? "safe" : "danger"}
           className="p-3.5 flex items-center justify-between"
         >
           <div className="flex items-center gap-3">
             {isSafe ? (
-              <ShieldCheck className="w-6 h-6 text-[#4ADE80]" />
+              <ShieldCheck className="w-6 h-6 text-emerald-600 dark:text-[#4ADE80]" />
             ) : (
-              <AlertTriangle className="w-6 h-6 text-[#FF4444]" />
+              <AlertTriangle className="w-6 h-6 text-red-600 dark:text-[#FF4444]" />
             )}
             <div>
               <span className="text-xs font-mono font-bold uppercase tracking-wider block">
                 {isSafe ? "SAFE // NODAL ZERO DISPLACEMENT" : "DANGER // HIGH DISPLACEMENT ANTINODE"}
               </span>
               <span className="text-[10px] font-mono opacity-80">
-                ACTIVE COMPONENT: {activeComp.name}
+                ACTIVE: {activeComp.name}
               </span>
             </div>
           </div>
@@ -140,62 +245,46 @@ export default function ComponentSafetyPage() {
           <div className="text-right">
             <span
               className={`text-2xl font-black font-mono ${
-                isSafe ? "text-[#4ADE80]" : "text-[#FF4444]"
+                isSafe ? "text-emerald-700 dark:text-[#4ADE80]" : "text-red-700 dark:text-[#FF4444]"
               }`}
             >
               {vibrationScore}
             </span>
-            <span className="text-[10px] font-mono text-[#8C999A] block">/ 100</span>
+            <span className="text-[10px] font-mono text-slate-500 dark:text-[#8C999A] block">/ 100</span>
           </div>
         </ChamferedCard>
 
-        {/* Interactive Drag & Drop Board with Chladni Nodal Overlay */}
+        {/* Interactive Drag & Drop Board with Real Nodal Field Canvas */}
         <div
           ref={boardRef}
+          onClick={handleBoardClick}
           onPointerMove={handleBoardPointerMove}
           onPointerUp={handlePointerUp}
-          className="relative w-full h-[320px] bg-[#101F23] rounded-[16px] border border-[#294044] overflow-hidden flex items-center justify-center cursor-crosshair touch-none shadow-xl"
+          onPointerLeave={handlePointerUp}
+          className={`relative w-full h-[320px] bg-slate-100 dark:bg-[#101F23] rounded-[16px] border overflow-hidden flex items-center justify-center touch-none shadow-md ${
+            isAddingStandoff
+              ? "border-sky-500 ring-2 ring-sky-400/40 cursor-cell"
+              : "border-slate-300 dark:border-[#294044] cursor-crosshair"
+          }`}
         >
-          {/* Subtle PCB traces and grid */}
-          <div className="absolute inset-0 ar-grid-bg opacity-30 pointer-events-none" />
+          <div className="absolute inset-0 ar-grid-bg opacity-45 dark:opacity-25 pointer-events-none" />
+          <canvas ref={nodalCanvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
 
-          {/* SVG Nodal Lines (Safe Green corridors) */}
-          <svg className="absolute inset-0 w-full h-full pointer-events-none">
-            {/* Center nodal cross */}
-            <line
-              x1="0"
-              y1="50%"
-              x2="100%"
-              y2="50%"
-              stroke="#0EB29A"
-              strokeWidth="10"
-              strokeOpacity="0.25"
-            />
-            <line
-              x1="50%"
-              y1="0"
-              x2="50%"
-              y2="100%"
-              stroke="#0EB29A"
-              strokeWidth="10"
-              strokeOpacity="0.25"
-            />
-            {/* Concentric nodal ellipse */}
-            <ellipse
-              cx="50%"
-              cy="50%"
-              rx="35%"
-              ry="35%"
-              fill="none"
-              stroke="#0EB29A"
-              strokeWidth="4"
-              strokeDasharray="6 6"
-              strokeOpacity="0.4"
-            />
-          </svg>
+          {/* Virtual Standoff Screws */}
+          {standoffs.map((pin, idx) => (
+            <div
+              key={pin.id}
+              style={{ left: `${pin.x}px`, top: `${pin.y}px`, transform: "translate(-50%, -50%)" }}
+              className="absolute w-5 h-5 rounded-full bg-amber-400 border-2 border-slate-900 shadow-md flex items-center justify-center text-[8px] font-mono font-black text-slate-900 z-20 pointer-events-none"
+              title={`Standoff S${idx + 1}`}
+            >
+              S{idx + 1}
+            </div>
+          ))}
 
-          {/* Draggable Components */}
           {components.map((comp) => {
+            const compScore = computeScore(comp);
+            const compSafe = compScore >= 70;
             const isSelected = selectedCompId === comp.id;
             return (
               <div
@@ -208,67 +297,76 @@ export default function ComponentSafetyPage() {
                 }}
                 className={`absolute p-2 rounded-[10px] border flex flex-col items-center justify-center font-mono cursor-grab active:cursor-grabbing transition-shadow z-30 select-none ${
                   isSelected
-                    ? isSafe
-                      ? "bg-[#1C332E] border-[#4ADE80] text-[#DDF0C2] shadow-[0_0_15px_rgba(74,222,128,0.5)] scale-105"
-                      : "bg-[#2D0A0A] border-[#FF4444] text-[#FF8888] shadow-[0_0_15px_rgba(255,68,68,0.5)] scale-105"
-                    : "bg-[#15282C] border-[#294044] text-[#8C999A] hover:border-[#3E5556]"
+                    ? compSafe
+                      ? "bg-emerald-50 border-emerald-500 text-emerald-900 shadow-md dark:bg-[#1C332E] dark:border-[#4ADE80] dark:text-[#DDF0C2] scale-105"
+                      : "bg-red-50 border-red-500 text-red-900 shadow-md dark:bg-[#2D0A0A] dark:border-[#FF4444] dark:text-[#FF8888] scale-105"
+                    : "bg-white border-slate-200 text-slate-700 hover:border-slate-300 dark:bg-[#15282C] dark:border-[#294044] dark:text-[#8C999A]"
                 }`}
               >
                 <div className="flex items-center gap-1 text-[9px] font-bold uppercase">
                   <Cpu className="w-3 h-3" />
                   <span>{comp.tag}</span>
                 </div>
-                <span className="text-[8px] opacity-75 mt-0.5">
-                  [{comp.x}, {comp.y}]
+                <span className="text-[8px] opacity-80 mt-0.5">
+                  SCORE {compScore}
                 </span>
               </div>
             );
           })}
 
-          <div className="absolute bottom-2 left-3 pointer-events-none text-[9px] font-mono text-[#8C999A]">
-            DRAG COMPONENT TOWARD TEAL NODAL CORRIDOR
+          <div className="absolute bottom-2 left-3 pointer-events-none text-[9px] font-mono text-slate-600 dark:text-[#8C999A] bg-white/80 dark:bg-[#0D191C]/80 px-2 py-0.5 rounded">
+            {isAddingStandoff
+              ? "TAP ANY RED ZONE TO ADD A VIRTUAL STANDOFF SCREW"
+              : `GREEN = SAFE • RED = ANTINODE${pinnActive ? " • PYTORCH PINN ACTIVE" : ""}`}
           </div>
         </div>
 
         {/* Component Selector Pills */}
         <div className="grid grid-cols-3 gap-2">
-          {components.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setSelectedCompId(c.id)}
-              className={`p-2 rounded-[10px] border text-left font-mono transition-all ${
-                selectedCompId === c.id
-                  ? "bg-[#1C332E] border-[#0EB29A] text-[#F5FDFF]"
-                  : "bg-[#15282C] border-[#294044] text-[#8C999A]"
-              }`}
-            >
-              <div className="text-[9px] text-[#0EB29A] font-bold">{c.tag}</div>
-              <div className="text-[10px] truncate">{c.name}</div>
-            </button>
-          ))}
+          {components.map((c) => {
+            const s = computeScore(c);
+            return (
+              <button
+                key={c.id}
+                onClick={() => setSelectedCompId(c.id)}
+                className={`p-2 rounded-[10px] border text-left font-mono transition-all ${
+                  selectedCompId === c.id
+                    ? "bg-sky-50 border-sky-500 text-slate-900 dark:bg-[#1C332E] dark:border-[#0EB29A] dark:text-[#F5FDFF]"
+                    : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50 dark:bg-[#15282C] dark:border-[#294044] dark:text-[#8C999A]"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] text-sky-600 dark:text-[#0EB29A] font-bold">{c.tag}</span>
+                  <span className={`text-[9px] font-bold ${s >= 70 ? "text-emerald-600" : "text-red-600"}`}>
+                    {s}
+                  </span>
+                </div>
+                <div className="text-[10px] truncate">{c.name}</div>
+              </button>
+            );
+          })}
         </div>
 
         {/* Placement Telemetry Specs */}
-        <ChamferedCard className="p-3.5 bg-[#15282C] border-[#294044] space-y-2">
+        <ChamferedCard className="p-3.5 space-y-2">
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-[#8C999A]">NODAL OFFSET:</span>
-            <span className="text-[#F5FDFF] font-bold">{minDistance} mm</span>
+            <span className="text-slate-500 dark:text-[#8C999A]">NODAL OFFSET:</span>
+            <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">{nodalOffsetMm} mm</span>
           </div>
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-[#8C999A]">ESTIMATED CYCLIC ACCELERATION:</span>
-            <span className="text-[#DDF0C2] font-bold">
+            <span className="text-slate-500 dark:text-[#8C999A]">ESTIMATED CYCLIC ACCELERATION:</span>
+            <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">
               {((100 - vibrationScore) * 0.14).toFixed(2)} G RMS
             </span>
           </div>
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-[#8C999A]">SOLDER JOINT FATIGUE LIFETIME:</span>
-            <span className={isSafe ? "text-[#4ADE80] font-bold" : "text-[#FF4444] font-bold"}>
+            <span className="text-slate-500 dark:text-[#8C999A]">SOLDER JOINT FATIGUE LIFETIME:</span>
+            <span className={isSafe ? "text-emerald-700 dark:text-[#4ADE80] font-bold" : "text-red-700 dark:text-[#FF4444] font-bold"}>
               {isSafe ? "> 250,000 CYCLES" : "< 14,000 CYCLES (FAIL)"}
             </span>
           </div>
         </ChamferedCard>
 
-        {/* Proceed CTA */}
         <div className="pt-2 mt-auto">
           <HudButton
             variant="primary"
@@ -285,4 +383,3 @@ export default function ComponentSafetyPage() {
     </div>
   );
 }
-

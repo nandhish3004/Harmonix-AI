@@ -31,17 +31,17 @@ export const HudButton: React.FC<HudButtonProps> = ({
 
   const variantStyles = {
     primary:
-      "bg-[#0EB29A] text-[#0D191C] hover:bg-[#12caa0] shadow-[0_0_15px_rgba(14,178,154,0.35)] font-bold",
+      "bg-slate-900 text-white hover:bg-slate-800 shadow-sm border border-slate-900 dark:border-transparent dark:bg-[#0EB29A] dark:text-[#0D191C] dark:hover:bg-[#12caa0] dark:shadow-[0_0_15px_rgba(14,178,154,0.35)] font-bold",
     lime:
-      "bg-[#DDF0C2] text-[#0D191C] hover:bg-[#eaffd4] shadow-[0_0_15px_rgba(221,240,194,0.3)] font-bold",
+      "bg-sky-600 text-white hover:bg-sky-700 shadow-sm font-bold dark:bg-[#DDF0C2] dark:text-[#0D191C] dark:hover:bg-[#eaffd4] dark:shadow-[0_0_15px_rgba(221,240,194,0.3)]",
     secondary:
-      "bg-[#233A3D] text-[#F5FDFF] border border-[#294044] hover:bg-[#2c474b] hover:border-[#3E5556]",
+      "bg-white text-slate-800 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 shadow-sm dark:bg-[#233A3D] dark:text-[#F5FDFF] dark:border-[#294044] dark:hover:bg-[#2c474b] dark:hover:border-[#3E5556]",
     danger:
-      "bg-[#2D0A0A] text-[#FF4444] border border-[#FF4444]/60 hover:bg-[#3d0e0e]",
+      "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 dark:bg-[#2D0A0A] dark:text-[#FF4444] dark:border-[#FF4444]/60 dark:hover:bg-[#3d0e0e]",
     ghost:
-      "bg-transparent text-[#8C999A] hover:text-[#F5FDFF] hover:bg-[#15282C]",
+      "bg-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-[#8C999A] dark:hover:text-[#F5FDFF] dark:hover:bg-[#15282C]",
     safe:
-      "bg-[#0D2B1A] text-[#4ADE80] border border-[#4ADE80]/60 hover:bg-[#133d25] font-bold",
+      "bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 dark:bg-[#0D2B1A] dark:text-[#4ADE80] dark:border-[#4ADE80]/60 dark:hover:bg-[#133d25] font-bold",
   };
 
   return (
@@ -87,4 +87,3 @@ export const HudButton: React.FC<HudButtonProps> = ({
     </button>
   );
 };
-

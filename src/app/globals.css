@@ -3,13 +3,24 @@
 @tailwind utilities;
 
 :root {
+  --background: #F8FAFC;
+  --foreground: #0F172A;
+  --card-bg: #FFFFFF;
+  --border-color: #E2E8F0;
+  --muted-text: #475569;
+}
+
+.dark {
   --background: #0D191C;
   --foreground: #F5FDFF;
+  --card-bg: #15282C;
+  --border-color: #294044;
+  --muted-text: #8C999A;
 }
 
 body {
-  background-color: #0D191C;
-  color: #F5FDFF;
+  background-color: var(--background);
+  color: var(--foreground);
   font-family: var(--font-mono), monospace;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
@@ -38,12 +49,18 @@ body {
   );
 }
 
-/* AR Grid pattern background */
+/* AR Grid pattern background (adaptive for light and dark) */
 .ar-grid-bg {
+  background-image: 
+    linear-gradient(to right, rgba(203, 213, 225, 0.45) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(203, 213, 225, 0.45) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.dark .ar-grid-bg {
   background-image: 
     linear-gradient(to right, rgba(41, 64, 68, 0.25) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(41, 64, 68, 0.25) 1px, transparent 1px);
-  background-size: 24px 24px;
 }
 
 /* Reticle crosshair */
@@ -54,6 +71,10 @@ body {
 .reticle-crosshair::after {
   content: '';
   position: absolute;
+  background-color: #0284C7;
+}
+.dark .reticle-crosshair::before,
+.dark .reticle-crosshair::after {
   background-color: #0EB29A;
 }
 .reticle-crosshair::before {
@@ -79,4 +100,3 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
-

@@ -6,6 +6,7 @@ import { Lock, Mail, ShieldAlert, ArrowRight, KeyRound, CheckCircle2, User } fro
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { createClient } from "@/utils/supabase/client";
 
 export default function AuthPage() {
@@ -109,30 +110,33 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0D191C] ar-grid-bg flex flex-col justify-between p-6">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0D191C] ar-grid-bg flex flex-col justify-between p-6 transition-colors duration-200">
       {/* Top HUD Branding */}
       <div className="space-y-6">
-        <div className="flex items-center justify-between text-xs font-mono text-[#8C999A]">
+        <div className="flex items-center justify-between text-xs font-mono text-slate-500 dark:text-[#8C999A]">
           <div className="flex items-center gap-2">
-            <Lock className="w-4 h-4 text-[#0EB29A]" />
-            <span className="tracking-widest text-[#0EB29A]">SECURITY GATEWAY</span>
+            <Lock className="w-4 h-4 text-sky-600 dark:text-[#0EB29A]" />
+            <span className="tracking-widest text-slate-800 dark:text-[#0EB29A] font-semibold">SECURITY GATEWAY</span>
           </div>
-          <HudBadge variant="teal" dot>
-            SYS.AUTH // 00b
-          </HudBadge>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <HudBadge variant="teal" dot>
+              SYS.AUTH // 00b
+            </HudBadge>
+          </div>
         </div>
 
         <div>
-          <h1 className="text-2xl font-bold font-mono tracking-tight text-[#F5FDFF]">
+          <h1 className="text-2xl font-bold font-mono tracking-tight text-slate-900 dark:text-[#F5FDFF]">
             HARMONIX-AR ACCESS
           </h1>
-          <p className="text-xs font-mono text-[#8C999A] mt-1">
+          <p className="text-xs font-mono text-slate-600 dark:text-[#8C999A] mt-1">
             Authenticate to sync workpiece point-clouds, vibration scans, and defect logs.
           </p>
         </div>
 
         {/* Tab Switcher: [SIGN IN] | [REGISTER] */}
-        <div className="bg-[#101F23] p-1 rounded-[12px] border border-[#294044] grid grid-cols-2 gap-1">
+        <div className="bg-slate-200/80 dark:bg-[#101F23] p-1 rounded-[12px] border border-slate-200 dark:border-[#294044] grid grid-cols-2 gap-1">
           <button
             type="button"
             onClick={() => {
@@ -141,8 +145,8 @@ export default function AuthPage() {
             }}
             className={`py-2 text-xs font-mono font-bold uppercase rounded-[10px] transition-all ${
               tab === "signin"
-                ? "bg-[#0EB29A] text-[#0D191C] shadow-[0_0_12px_rgba(14,178,154,0.3)]"
-                : "text-[#8C999A] hover:text-[#F5FDFF]"
+                ? "bg-white text-slate-900 shadow-sm dark:bg-[#0EB29A] dark:text-[#0D191C] dark:shadow-[0_0_12px_rgba(14,178,154,0.3)]"
+                : "text-slate-600 dark:text-[#8C999A] hover:text-slate-900 dark:hover:text-[#F5FDFF]"
             }`}
           >
             SIGN IN
@@ -155,8 +159,8 @@ export default function AuthPage() {
             }}
             className={`py-2 text-xs font-mono font-bold uppercase rounded-[10px] transition-all ${
               tab === "register"
-                ? "bg-[#0EB29A] text-[#0D191C] shadow-[0_0_12px_rgba(14,178,154,0.3)]"
-                : "text-[#8C999A] hover:text-[#F5FDFF]"
+                ? "bg-white text-slate-900 shadow-sm dark:bg-[#0EB29A] dark:text-[#0D191C] dark:shadow-[0_0_12px_rgba(14,178,154,0.3)]"
+                : "text-slate-600 dark:text-[#8C999A] hover:text-slate-900 dark:hover:text-[#F5FDFF]"
             }`}
           >
             REGISTER
@@ -168,7 +172,7 @@ export default function AuthPage() {
           type="button"
           onClick={handleGoogleSignIn}
           disabled={isGoogleLoading}
-          className="w-full bg-[#15282C] border border-[#294044] hover:border-[#0EB29A] hover:bg-[#1C332E] text-[#F5FDFF] rounded-[12px] py-3.5 px-4 font-mono text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-sm"
+          className="w-full bg-white dark:bg-[#15282C] border border-slate-200 dark:border-[#294044] hover:border-sky-500 dark:hover:border-[#0EB29A] hover:bg-slate-50 dark:hover:bg-[#1C332E] text-slate-800 dark:text-[#F5FDFF] rounded-[12px] py-3.5 px-4 font-mono text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-sm"
         >
           {/* Standard Google SVG Icon */}
           <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
@@ -195,18 +199,18 @@ export default function AuthPage() {
         </button>
 
         <div className="relative flex items-center justify-center">
-          <div className="border-t border-[#294044] w-full" />
-          <span className="bg-[#0D191C] px-3 font-mono text-[10px] tracking-widest text-[#8C999A] uppercase">
+          <div className="border-t border-slate-200 dark:border-[#294044] w-full" />
+          <span className="bg-slate-50 dark:bg-[#0D191C] px-3 font-mono text-[10px] tracking-widest text-slate-500 dark:text-[#8C999A] uppercase">
             OR OPERATOR CREDENTIALS
           </span>
         </div>
 
         {/* Error / Success Toast Callout */}
         {errorMsg && (
-          <div className="p-3.5 bg-[#2D0A0A] border border-[#FF4444]/60 rounded-[12px] flex items-start gap-3 text-xs font-mono text-[#FF8888] animate-in fade-in">
-            <ShieldAlert className="w-4 h-4 text-[#FF4444] shrink-0 mt-0.5" />
+          <div className="p-3.5 bg-red-50 border border-red-200 dark:bg-[#2D0A0A] dark:border-[#FF4444]/60 rounded-[12px] flex items-start gap-3 text-xs font-mono text-red-800 dark:text-[#FF8888] animate-in fade-in">
+            <ShieldAlert className="w-4 h-4 text-red-600 dark:text-[#FF4444] shrink-0 mt-0.5" />
             <div className="flex-1">
-              <span className="font-bold uppercase tracking-wider block text-[#FF4444]">
+              <span className="font-bold uppercase tracking-wider block text-red-700 dark:text-[#FF4444]">
                 AUTH EXCEPTION
               </span>
               <span>{errorMsg}</span>
@@ -215,10 +219,10 @@ export default function AuthPage() {
         )}
 
         {successMsg && (
-          <div className="p-3.5 bg-[#0D2B1A] border border-[#4ADE80]/60 rounded-[12px] flex items-start gap-3 text-xs font-mono text-[#DDF0C2] animate-in fade-in">
-            <CheckCircle2 className="w-4 h-4 text-[#4ADE80] shrink-0 mt-0.5" />
+          <div className="p-3.5 bg-emerald-50 border border-emerald-200 dark:bg-[#0D2B1A] dark:border-[#4ADE80]/60 rounded-[12px] flex items-start gap-3 text-xs font-mono text-emerald-800 dark:text-[#DDF0C2] animate-in fade-in">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-[#4ADE80] shrink-0 mt-0.5" />
             <div className="flex-1">
-              <span className="font-bold uppercase tracking-wider block text-[#4ADE80]">
+              <span className="font-bold uppercase tracking-wider block text-emerald-700 dark:text-[#4ADE80]">
                 REGISTRATION PENDING
               </span>
               <span>{successMsg}</span>
@@ -230,11 +234,11 @@ export default function AuthPage() {
         <form onSubmit={handleEmailAuth} className="space-y-4">
           {tab === "register" && (
             <div className="space-y-1.5">
-              <label className="block text-[11px] font-mono tracking-wider text-[#8C999A] uppercase">
+              <label className="block text-[11px] font-mono tracking-wider text-slate-600 dark:text-[#8C999A] uppercase font-semibold">
                 OPERATOR FULL NAME
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#8C999A]">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 dark:text-[#8C999A]">
                   <User className="w-4 h-4" />
                 </div>
                 <input
@@ -243,18 +247,18 @@ export default function AuthPage() {
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Dr. Helena Vance"
-                  className="w-full bg-[#15282C] border border-[#294044] focus:border-[#0EB29A] text-[#F5FDFF] placeholder-[#8C999A]/50 rounded-[12px] pl-10 pr-4 py-3 font-mono text-xs focus:outline-none transition-colors"
+                  className="w-full bg-white dark:bg-[#15282C] border border-slate-300 dark:border-[#294044] focus:border-sky-600 dark:focus:border-[#0EB29A] text-slate-900 dark:text-[#F5FDFF] placeholder-slate-400 dark:placeholder-[#8C999A]/50 rounded-[12px] pl-10 pr-4 py-3 font-mono text-xs focus:outline-none transition-colors shadow-xs"
                 />
               </div>
             </div>
           )}
 
           <div className="space-y-1.5">
-            <label className="block text-[11px] font-mono tracking-wider text-[#8C999A] uppercase">
+            <label className="block text-[11px] font-mono tracking-wider text-slate-600 dark:text-[#8C999A] uppercase font-semibold">
               WORK EMAIL
             </label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#8C999A]">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 dark:text-[#8C999A]">
                 <Mail className="w-4 h-4" />
               </div>
               <input
@@ -263,24 +267,24 @@ export default function AuthPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="operator@acoustics-lab.internal"
-                className="w-full bg-[#15282C] border border-[#294044] focus:border-[#0EB29A] text-[#F5FDFF] placeholder-[#8C999A]/50 rounded-[12px] pl-10 pr-4 py-3 font-mono text-xs focus:outline-none transition-colors"
+                className="w-full bg-white dark:bg-[#15282C] border border-slate-300 dark:border-[#294044] focus:border-sky-600 dark:focus:border-[#0EB29A] text-slate-900 dark:text-[#F5FDFF] placeholder-slate-400 dark:placeholder-[#8C999A]/50 rounded-[12px] pl-10 pr-4 py-3 font-mono text-xs focus:outline-none transition-colors shadow-xs"
               />
             </div>
           </div>
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="block text-[11px] font-mono tracking-wider text-[#8C999A] uppercase">
+              <label className="block text-[11px] font-mono tracking-wider text-slate-600 dark:text-[#8C999A] uppercase font-semibold">
                 SECURITY CIPHER (PASSWORD)
               </label>
               {tab === "signin" && (
-                <span className="text-[10px] font-mono text-[#0EB29A] cursor-pointer hover:underline">
+                <span className="text-[10px] font-mono text-sky-600 dark:text-[#0EB29A] cursor-pointer hover:underline font-semibold">
                   FORGOT CIPHER?
                 </span>
               )}
             </div>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#8C999A]">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 dark:text-[#8C999A]">
                 <KeyRound className="w-4 h-4" />
               </div>
               <input
@@ -289,7 +293,7 @@ export default function AuthPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••••"
-                className="w-full bg-[#15282C] border border-[#294044] focus:border-[#0EB29A] text-[#F5FDFF] placeholder-[#8C999A]/50 rounded-[12px] pl-10 pr-4 py-3 font-mono text-xs focus:outline-none transition-colors"
+                className="w-full bg-white dark:bg-[#15282C] border border-slate-300 dark:border-[#294044] focus:border-sky-600 dark:focus:border-[#0EB29A] text-slate-900 dark:text-[#F5FDFF] placeholder-slate-400 dark:placeholder-[#8C999A]/50 rounded-[12px] pl-10 pr-4 py-3 font-mono text-xs focus:outline-none transition-colors shadow-xs"
               />
             </div>
           </div>
@@ -309,11 +313,10 @@ export default function AuthPage() {
 
       {/* Footer Info */}
       <div className="pt-6 pb-2 text-center">
-        <p className="text-[10px] font-mono text-[#8C999A]">
+        <p className="text-[10px] font-mono text-slate-500 dark:text-[#8C999A]">
           ENCRYPTED VIA AES-GCM-256 // SUPABASE ROW LEVEL SECURITY ACTIVE
         </p>
       </div>
     </div>
   );
 }
-

@@ -1,24 +1,30 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Download,
   FileCode,
   FileText,
   CloudUpload,
-  CheckCircle2,
-  AlertTriangle,
   RotateCcw,
-  ShieldCheck,
-  Printer,
-  Copy,
 } from "lucide-react";
 import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
 import { createClient } from "@/utils/supabase/client";
+import {
+  getStoredActiveMode,
+  getStoredMaterial,
+  getStoredThickness,
+  DEFAULT_MATERIAL,
+  MaterialData,
+} from "@/utils/physics";
+
+interface Point2D {
+  x: number;
+  y: number;
+}
 
 export default function ExportReportPage() {
   const router = useRouter();
@@ -27,10 +33,73 @@ export default function ExportReportPage() {
   const [syncStatus, setSyncStatus] = useState<"idle" | "synced" | "error">("idle");
   const [syncError, setSyncError] = useState<string | null>(null);
 
-  // Generate real DXF file content
+  const [material, setMaterial] = useState<MaterialData>(DEFAULT_MATERIAL);
+  const [thicknessMm, setThicknessMm] = useState<number>(1.6);
+  const [activeMode, setActiveMode] = useState({ indices: "(2, 2)", name: "Radial Cross", freqHz: 740 });
+  const [measuredFreq, setMeasuredFreq] = useState<number>(702);
+  const [deltaHz, setDeltaHz] = useState<number>(-38);
+  const [safetyScore, setSafetyScore] = useState<number>(88);
+  const [defectDetected, setDefectDetected] = useState<boolean>(true);
+  const [boundary, setBoundary] = useState<Point2D[]>([
+    { x: 45, y: 160 },
+    { x: 348, y: 160 },
+    { x: 348, y: 580 },
+    { x: 45, y: 580 },
+  ]);
+
+  useEffect(() => {
+    setMaterial(getStoredMaterial());
+    setThicknessMm(getStoredThickness());
+    const mode = getStoredActiveMode();
+    setActiveMode({ indices: mode.indices, name: mode.name, freqHz: mode.freqHz });
+
+    if (typeof window !== "undefined") {
+      try {
+        const b = localStorage.getItem("harmonix_boundary");
+        if (b) {
+          const parsed = JSON.parse(b);
+          if (Array.isArray(parsed) && parsed.length >= 3) setBoundary(parsed);
+        }
+      } catch {
+        // ignore
+      }
+      const meas = Number(localStorage.getItem("harmonix_measured_freq"));
+      if (Number.isFinite(meas) && meas > 0) setMeasuredFreq(meas);
+      const d = Number(localStorage.getItem("harmonix_delta_hz"));
+      if (Number.isFinite(d)) setDeltaHz(d);
+      const s = Number(localStorage.getItem("harmonix_safety_score"));
+      if (Number.isFinite(s) && s > 0) setSafetyScore(s);
+      const def = localStorage.getItem("harmonix_defect_detected");
+      if (def !== null) setDefectDetected(def === "true");
+    }
+  }, []);
+
+  // Generate real DXF file content from actual scanned boundary
   const handleExportDxf = () => {
     setIsExportingDxf(true);
     try {
+      const verticesDxf = boundary
+        .map(
+          (pt) => `0
+VERTEX
+8
+WORKPIECE_BOUNDARY
+10
+${pt.x.toFixed(1)}
+20
+${pt.y.toFixed(1)}
+30
+0.0`
+        )
+        .join("\n");
+
+      const midX = boundary.reduce((acc, p) => acc + p.x, 0) / boundary.length;
+      const midY = boundary.reduce((acc, p) => acc + p.y, 0) / boundary.length;
+      const minX = Math.min(...boundary.map((p) => p.x));
+      const maxX = Math.max(...boundary.map((p) => p.x));
+      const minY = Math.min(...boundary.map((p) => p.y));
+      const maxY = Math.max(...boundary.map((p) => p.y));
+
       const dxfContent = `0
 SECTION
 2
@@ -65,46 +134,7 @@ WORKPIECE_BOUNDARY
 1
 70
 1
-0
-VERTEX
-8
-WORKPIECE_BOUNDARY
-10
-45.0
-20
-160.0
-30
-0.0
-0
-VERTEX
-8
-WORKPIECE_BOUNDARY
-10
-348.0
-20
-160.0
-30
-0.0
-0
-VERTEX
-8
-WORKPIECE_BOUNDARY
-10
-348.0
-20
-580.0
-30
-0.0
-0
-VERTEX
-8
-WORKPIECE_BOUNDARY
-10
-45.0
-20
-580.0
-30
-0.0
+${verticesDxf}
 0
 SEQEND
 0
@@ -112,15 +142,15 @@ LINE
 8
 CHLADNI_NODAL_LINES
 10
-45.0
+${minX.toFixed(1)}
 20
-370.0
+${midY.toFixed(1)}
 30
 0.0
 11
-348.0
+${maxX.toFixed(1)}
 21
-370.0
+${midY.toFixed(1)}
 31
 0.0
 0
@@ -128,29 +158,17 @@ LINE
 8
 CHLADNI_NODAL_LINES
 10
-196.5
+${midX.toFixed(1)}
 20
-160.0
+${minY.toFixed(1)}
 30
 0.0
 11
-196.5
+${midX.toFixed(1)}
 21
-580.0
+${maxY.toFixed(1)}
 31
 0.0
-0
-CIRCLE
-8
-DEFECT_ANOMALY_CALLOUT
-10
-215.0
-20
-120.0
-30
-0.0
-40
-14.0
 0
 ENDSEC
 0
@@ -197,15 +215,10 @@ EOF
         .from("workpiece_scans") as any)
         .insert({
           user_id: user.id,
-          name: "FR4 Plate #HX-9042",
-          material_type: "FR4 Glass Epoxy",
-          thickness_mm: 1.6,
-          boundary_polygon: [
-            { x: 45, y: 160 },
-            { x: 348, y: 160 },
-            { x: 348, y: 580 },
-            { x: 45, y: 580 },
-          ],
+          name: `${material.code} Scan`,
+          material_type: material.name,
+          thickness_mm: thicknessMm,
+          boundary_polygon: boundary,
         } as any)
         .select()
         .single();
@@ -217,10 +230,10 @@ EOF
         .from("inspection_sessions") as any)
         .insert({
           scan_id: scanData?.id,
-          peak_frequency_hz: 702.0,
-          active_mode: "Mode (2,2) Radial Cross",
-          vibration_score: 88.5,
-          defect_detected: true,
+          peak_frequency_hz: measuredFreq,
+          active_mode: `Mode ${activeMode.indices} ${activeMode.name}`,
+          vibration_score: safetyScore,
+          defect_detected: defectDetected,
         } as any);
 
       if (sessionError) throw sessionError;
@@ -236,7 +249,7 @@ EOF
   };
 
   return (
-    <div className="min-h-screen bg-[#0D191C] flex flex-col print:bg-white print:text-black">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0D191C] flex flex-col print:bg-white print:text-black transition-colors duration-200">
       <div className="print:hidden">
         <HudHeader
           title="INSPECTION REPORT"
@@ -244,8 +257,8 @@ EOF
           subtitle="Audit Artifacts & CAD Vector Export"
           backHref="/defects"
           rightAction={
-            <HudBadge variant="danger">
-              DEFECT LOGGED
+            <HudBadge variant={defectDetected ? "danger" : "safe"}>
+              {defectDetected ? "DEFECT LOGGED" : "PASS"}
             </HudBadge>
           }
         />
@@ -253,52 +266,60 @@ EOF
 
       <div className="p-4 space-y-4 flex-1 flex flex-col">
         {/* Workpiece Summary Card */}
-        <ChamferedCard className="p-4 bg-[#15282C] border-[#294044] space-y-3">
-          <div className="flex items-center justify-between border-b border-[#294044]/60 pb-2">
+        <ChamferedCard className="p-4 space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-200 dark:border-[#294044]/60 pb-2">
             <div>
-              <span className="text-[10px] font-mono tracking-widest text-[#0EB29A] uppercase block">
+              <span className="text-[10px] font-mono tracking-widest text-sky-600 dark:text-[#0EB29A] uppercase block font-semibold">
                 AUDIT CERTIFICATE
               </span>
-              <h2 className="text-base font-bold font-mono text-[#F5FDFF]">
+              <h2 className="text-base font-bold font-mono text-slate-900 dark:text-[#F5FDFF]">
                 HX-2026-9042A
               </h2>
             </div>
-            <span className="text-[11px] font-mono bg-[#2D0A0A] text-[#FF4444] border border-[#FF4444]/40 font-bold px-2 py-1 rounded-[6px]">
-              NON-CONFORMANT
+            <span
+              className={`text-[11px] font-mono font-bold px-2 py-1 rounded-[6px] border ${
+                defectDetected
+                  ? "bg-red-50 text-red-700 border-red-200 dark:bg-[#2D0A0A] dark:text-[#FF4444] dark:border-[#FF4444]/40"
+                  : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-[#1C332E] dark:text-[#4ADE80] dark:border-[#4ADE80]/40"
+              }`}
+            >
+              {defectDetected ? "NON-CONFORMANT" : "CONFORMANT (PASS)"}
             </span>
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-xs font-mono">
             <div>
-              <span className="text-[#8C999A] block text-[10px]">SUBSTRATE:</span>
-              <span className="text-[#F5FDFF] font-bold">FR4 GLASS EPOXY</span>
+              <span className="text-slate-500 dark:text-[#8C999A] block text-[10px]">SUBSTRATE:</span>
+              <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">{material.name.toUpperCase()}</span>
             </div>
             <div>
-              <span className="text-[#8C999A] block text-[10px]">THICKNESS:</span>
-              <span className="text-[#F5FDFF] font-bold">1.6 mm</span>
+              <span className="text-slate-500 dark:text-[#8C999A] block text-[10px]">THICKNESS:</span>
+              <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">{thicknessMm} mm</span>
             </div>
             <div>
-              <span className="text-[#8C999A] block text-[10px]">RESONANT FREQUENCY:</span>
-              <span className="text-[#DDF0C2] font-bold">702 Hz (-38 Hz)</span>
+              <span className="text-slate-500 dark:text-[#8C999A] block text-[10px]">RESONANT FREQUENCY:</span>
+              <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">
+                {measuredFreq} Hz ({deltaHz >= 0 ? `+${deltaHz}` : deltaHz} Hz)
+              </span>
             </div>
             <div>
-              <span className="text-[#8C999A] block text-[10px]">EIGENMODE:</span>
-              <span className="text-[#0EB29A] font-bold">MODE (2, 2)</span>
+              <span className="text-slate-500 dark:text-[#8C999A] block text-[10px]">EIGENMODE:</span>
+              <span className="text-sky-600 dark:text-[#0EB29A] font-bold">MODE {activeMode.indices}</span>
             </div>
             <div>
-              <span className="text-[#8C999A] block text-[10px]">PEAK STRESS:</span>
-              <span className="text-[#F5FDFF] font-bold">84.6 MPa</span>
+              <span className="text-slate-500 dark:text-[#8C999A] block text-[10px]">SAFETY SCORE:</span>
+              <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">{safetyScore} / 100</span>
             </div>
             <div>
-              <span className="text-[#8C999A] block text-[10px]">CONFIDENCE:</span>
-              <span className="text-[#4ADE80] font-bold">98.4%</span>
+              <span className="text-slate-500 dark:text-[#8C999A] block text-[10px]">VERTICES CAPTURED:</span>
+              <span className="text-emerald-600 dark:text-[#4ADE80] font-bold">{boundary.length} PINS</span>
             </div>
           </div>
         </ChamferedCard>
 
         {/* Export Vector & Document Buttons */}
         <div className="space-y-2.5 print:hidden">
-          <span className="text-[11px] font-mono tracking-wider text-[#8C999A] uppercase block">
+          <span className="text-[11px] font-mono tracking-wider text-slate-600 dark:text-[#8C999A] uppercase block font-semibold">
             EXPORT ASSETS & CAD LAYERS
           </span>
 

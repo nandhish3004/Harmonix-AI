@@ -1,6 +1,7 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
+  darkMode: "class",
   content: [
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
@@ -10,6 +11,7 @@ const config: Config = {
     extend: {
       colors: {
         hud: {
+          // Dark Theme Palette
           bg: "#0D191C",
           surface: "#101F23",
           card: "#15282C",
@@ -28,6 +30,23 @@ const config: Config = {
           safe: "#4ADE80",
           "safe-bg": "#0D2B1A",
           warning: "#F5C518",
+
+          // Light Theme Engineering Palette
+          "light-bg": "#F8FAFC",
+          "light-card": "#FFFFFF",
+          "light-surface": "#F1F5F9",
+          "light-border": "#E2E8F0",
+          "light-border-bright": "#CBD5E1",
+          "light-primary": "#0F172A",
+          "light-accent": "#0284C7",
+          "light-accent-hover": "#0369A1",
+          "light-muted": "#475569",
+          "light-subtle": "#64748B",
+          "light-text": "#0F172A",
+          "light-danger": "#DC2626",
+          "light-danger-bg": "#FEF2F2",
+          "light-safe": "#16A34A",
+          "light-safe-bg": "#F0FDF4",
         },
       },
       fontFamily: {
@@ -37,6 +56,7 @@ const config: Config = {
       boxShadow: {
         hud: "0 0 20px rgba(14, 178, 154, 0.15)",
         "hud-glow": "0 0 25px rgba(221, 240, 194, 0.2)",
+        "light-card": "0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05)",
       },
     },
   },
@@ -44,4 +64,3 @@ const config: Config = {
 };
 
 export default config;
-

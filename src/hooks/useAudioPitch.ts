@@ -43,7 +43,11 @@ export function useAudioPitch(initialTargetFrequency: number = 440): AudioPitchS
   const setTargetResonance = useCallback((freq: number, tolerance: number = 15) => {
     targetFreqRef.current = freq;
     toleranceRef.current = tolerance;
-  }, []);
+    setIsResonant((prev) => {
+      void prev;
+      return Math.abs(frequency - freq) <= tolerance;
+    });
+  }, [frequency]);
 
   const stopListening = useCallback(() => {
     if (animFrameRef.current) {
@@ -144,6 +148,9 @@ export function useAudioPitch(initialTargetFrequency: number = 440): AudioPitchS
       streamRef.current = stream;
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const audioCtx = new AudioCtx();
+      if (audioCtx.state === "suspended") {
+        await audioCtx.resume();
+      }
       audioCtxRef.current = audioCtx;
 
       const source = audioCtx.createMediaStreamSource(stream);

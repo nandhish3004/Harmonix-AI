@@ -16,11 +16,16 @@ export const ChamferedCard: React.FC<ChamferedCardProps> = ({
   ...props
 }) => {
   const variantStyles = {
-    default: "bg-[#15282C] border-[#294044] text-[#F5FDFF]",
-    active: "bg-[#1C332E] border-[#0EB29A] text-[#F5FDFF] shadow-hud",
-    danger: "bg-[#2D0A0A] border-[#FF4444]/60 text-[#FF8888]",
-    safe: "bg-[#0D2B1A] border-[#4ADE80]/60 text-[#DDF0C2]",
-    subtle: "bg-[#101F23] border-[#233A3D] text-[#8C999A]",
+    default:
+      "bg-white border-slate-200 text-slate-900 shadow-sm dark:bg-[#15282C] dark:border-[#294044] dark:text-[#F5FDFF] dark:shadow-none",
+    active:
+      "bg-sky-50/80 border-sky-500 text-slate-900 shadow-sm dark:bg-[#1C332E] dark:border-[#0EB29A] dark:text-[#F5FDFF] dark:shadow-hud",
+    danger:
+      "bg-red-50/90 border-red-200 text-red-800 dark:bg-[#2D0A0A] dark:border-[#FF4444]/60 dark:text-[#FF8888]",
+    safe:
+      "bg-emerald-50/90 border-emerald-200 text-emerald-900 dark:bg-[#0D2B1A] dark:border-[#4ADE80]/60 dark:text-[#DDF0C2]",
+    subtle:
+      "bg-slate-50 border-slate-200 text-slate-600 dark:bg-[#101F23] dark:border-[#233A3D] dark:text-[#8C999A]",
   };
 
   const chamferClass = cornerChamfer
@@ -43,4 +48,3 @@ export const ChamferedCard: React.FC<ChamferedCardProps> = ({
     </div>
   );
 };
-

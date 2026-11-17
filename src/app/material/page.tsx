@@ -3,18 +3,12 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Layers,
   Check,
-  Cpu,
-  Zap,
-  Gauge,
   ArrowRight,
-  ShieldAlert,
 } from "lucide-react";
 import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
-import { HudBadge } from "@/components/ui/HudBadge";
 
 interface MaterialConfig {
   id: string;
@@ -98,7 +92,7 @@ export default function MaterialSelectionPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0D191C] flex flex-col">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0D191C] flex flex-col transition-colors duration-200">
       <HudHeader
         title="MATERIAL MATRIX"
         step="SCREEN 03 // 10"
@@ -108,10 +102,10 @@ export default function MaterialSelectionPage() {
 
       <div className="p-4 space-y-4 flex-1">
         <div>
-          <span className="text-xs font-mono text-[#8C999A] uppercase tracking-wider block mb-1">
+          <span className="text-xs font-mono text-slate-600 dark:text-[#8C999A] uppercase tracking-wider block mb-1 font-semibold">
             WORKPIECE SUBSTRATE SELECTION
           </span>
-          <p className="text-xs font-mono text-[#8C999A]">
+          <p className="text-xs font-mono text-slate-600 dark:text-[#8C999A]">
             Select mechanical composition to calibrate speed of sound and theoretical Chladni nodal harmonics.
           </p>
         </div>
@@ -129,18 +123,14 @@ export default function MaterialSelectionPage() {
               >
                 <ChamferedCard
                   variant={isSelected ? "active" : "default"}
-                  className={`p-3.5 border transition-all ${
-                    isSelected
-                      ? "border-[#0EB29A] bg-[#1C332E] shadow-[0_0_15px_rgba(14,178,154,0.2)]"
-                      : "border-[#294044] bg-[#15282C] hover:border-[#3E5556]"
-                  }`}
+                  className="p-3.5 border transition-all"
                 >
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-[10px] font-mono tracking-widest text-[#0EB29A] uppercase">
+                      <span className="text-[10px] font-mono tracking-widest text-sky-600 dark:text-[#0EB29A] uppercase font-semibold">
                         {mat.category}
                       </span>
-                      <h3 className="text-sm font-bold font-mono text-[#F5FDFF]">
+                      <h3 className="text-sm font-bold font-mono text-slate-900 dark:text-[#F5FDFF]">
                         {mat.name}
                       </h3>
                     </div>
@@ -148,34 +138,34 @@ export default function MaterialSelectionPage() {
                     <div
                       className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all ${
                         isSelected
-                          ? "border-[#0EB29A] bg-[#0EB29A] text-[#0D191C]"
-                          : "border-[#294044] bg-[#101F23] text-transparent"
+                          ? "border-sky-600 bg-sky-600 text-white dark:border-[#0EB29A] dark:bg-[#0EB29A] dark:text-[#0D191C]"
+                          : "border-slate-200 bg-slate-100 dark:border-[#294044] dark:bg-[#101F23] text-transparent"
                       }`}
                     >
                       <Check className="w-3.5 h-3.5 stroke-[3]" />
                     </div>
                   </div>
 
-                  <p className="text-[11px] font-mono text-[#8C999A] mt-1.5 leading-snug">
+                  <p className="text-[11px] font-mono text-slate-600 dark:text-[#8C999A] mt-1.5 leading-snug">
                     {mat.description}
                   </p>
 
-                  <div className="grid grid-cols-3 gap-2 mt-3 pt-2.5 border-t border-[#294044]/60 text-[10px] font-mono">
+                  <div className="grid grid-cols-3 gap-2 mt-3 pt-2.5 border-t border-slate-200 dark:border-[#294044]/60 text-[10px] font-mono">
                     <div>
-                      <span className="text-[#8C999A] block">MODULUS (E)</span>
-                      <span className="text-[#F5FDFF] font-bold">
+                      <span className="text-slate-500 dark:text-[#8C999A] block">MODULUS (E)</span>
+                      <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">
                         {mat.youngsModulusGpa} GPa
                       </span>
                     </div>
                     <div>
-                      <span className="text-[#8C999A] block">DENSITY (ρ)</span>
-                      <span className="text-[#F5FDFF] font-bold">
+                      <span className="text-slate-500 dark:text-[#8C999A] block">DENSITY (ρ)</span>
+                      <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">
                         {mat.densityKgM3} kg/m³
                       </span>
                     </div>
                     <div>
-                      <span className="text-[#8C999A] block">WAVE SPEED (c)</span>
-                      <span className="text-[#DDF0C2] font-bold">
+                      <span className="text-slate-500 dark:text-[#8C999A] block">WAVE SPEED (c)</span>
+                      <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">
                         {mat.acousticSpeedMs} m/s
                       </span>
                     </div>
@@ -187,12 +177,12 @@ export default function MaterialSelectionPage() {
         </div>
 
         {/* Thickness Slider Control */}
-        <ChamferedCard className="p-4 bg-[#15282C] border-[#294044] space-y-3">
+        <ChamferedCard className="p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-[#8C999A] uppercase tracking-wider">
+            <span className="text-xs font-mono text-slate-600 dark:text-[#8C999A] uppercase tracking-wider font-semibold">
               PLATE THICKNESS (h)
             </span>
-            <span className="text-sm font-mono font-bold text-[#0EB29A]">
+            <span className="text-sm font-mono font-bold text-sky-700 dark:text-[#0EB29A]">
               {thicknessMm.toFixed(1)} mm
             </span>
           </div>
@@ -204,18 +194,18 @@ export default function MaterialSelectionPage() {
             step="0.1"
             value={thicknessMm}
             onChange={(e) => setThicknessMm(parseFloat(e.target.value))}
-            className="w-full accent-[#0EB29A] bg-[#101F23] h-2 rounded-lg cursor-pointer"
+            className="w-full accent-sky-600 dark:accent-[#0EB29A] bg-slate-200 dark:bg-[#101F23] h-2 rounded-lg cursor-pointer"
           />
 
-          <div className="flex justify-between text-[10px] font-mono text-[#8C999A]">
+          <div className="flex justify-between text-[10px] font-mono text-slate-500 dark:text-[#8C999A]">
             <span>0.8 mm (FLEXIBLE)</span>
             <span>STANDARD: 1.6 mm</span>
             <span>6.0 mm (RIGID)</span>
           </div>
 
-          <div className="p-2.5 bg-[#101F23] rounded-[8px] border border-[#233A3D] flex items-center justify-between text-xs font-mono">
-            <span className="text-[#8C999A]">FLEXURAL RIGIDITY (D):</span>
-            <span className="text-[#DDF0C2] font-bold">{flexuralRigidity} N·m</span>
+          <div className="p-2.5 bg-slate-50 dark:bg-[#101F23] rounded-[8px] border border-slate-200 dark:border-[#233A3D] flex items-center justify-between text-xs font-mono">
+            <span className="text-slate-600 dark:text-[#8C999A]">FLEXURAL RIGIDITY (D):</span>
+            <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">{flexuralRigidity} N·m</span>
           </div>
         </ChamferedCard>
 
@@ -236,4 +226,3 @@ export default function MaterialSelectionPage() {
     </div>
   );
 }
-

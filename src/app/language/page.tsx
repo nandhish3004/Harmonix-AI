@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Globe, Check, Radio, Cpu, ArrowRight, Shield } from "lucide-react";
+import { Globe, Check, Cpu, ArrowRight, Shield } from "lucide-react";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { createClient } from "@/utils/supabase/client";
 
 interface LanguageOption {
@@ -61,30 +62,33 @@ export default function LanguageSelectionPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0D191C] ar-grid-bg flex flex-col justify-between p-6">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0D191C] ar-grid-bg flex flex-col justify-between p-6 transition-colors duration-200">
       {/* Top Header telemetry */}
       <div className="space-y-6">
-        <div className="flex items-center justify-between text-xs font-mono text-[#8C999A]">
+        <div className="flex items-center justify-between text-xs font-mono text-slate-500 dark:text-[#8C999A]">
           <div className="flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-[#0EB29A]" />
-            <span className="tracking-widest text-[#0EB29A]">HARMONIX-AR OS</span>
+            <Cpu className="w-4 h-4 text-sky-600 dark:text-[#0EB29A]" />
+            <span className="tracking-widest text-slate-800 dark:text-[#0EB29A] font-semibold">HARMONIX-AR OS</span>
           </div>
-          <HudBadge variant="teal" dot>
-            SYS.INIT // 00
-          </HudBadge>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <HudBadge variant="teal" dot>
+              SYS.INIT // 00
+            </HudBadge>
+          </div>
         </div>
 
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <Globe className="w-5 h-5 text-[#0EB29A]" />
-            <span className="text-xs font-mono tracking-widest text-[#8C999A] uppercase">
+            <Globe className="w-5 h-5 text-sky-600 dark:text-[#0EB29A]" />
+            <span className="text-xs font-mono tracking-widest text-slate-500 dark:text-[#8C999A] uppercase font-semibold">
               LOCALIZATION PROTOCOL
             </span>
           </div>
-          <h1 className="text-2xl font-bold font-mono tracking-tight text-[#F5FDFF]">
+          <h1 className="text-2xl font-bold font-mono tracking-tight text-slate-900 dark:text-[#F5FDFF]">
             SELECT SYSTEM LOCALE
           </h1>
-          <p className="text-xs font-mono text-[#8C999A] mt-1">
+          <p className="text-xs font-mono text-slate-600 dark:text-[#8C999A] mt-1">
             Calibrate AR telemetry readouts, acoustic diagnostics, and export templates for your deployment region.
           </p>
         </div>
@@ -104,30 +108,30 @@ export default function LanguageSelectionPage() {
                   variant={isSelected ? "active" : "default"}
                   className={`p-4 flex items-center justify-between cursor-pointer border ${
                     isSelected
-                      ? "border-[#0EB29A] bg-[#1C332E] shadow-[0_0_15px_rgba(14,178,154,0.25)]"
-                      : "border-[#294044] bg-[#15282C] hover:border-[#3E5556] hover:bg-[#183F3E]/40"
+                      ? "border-sky-500 bg-sky-50/80 shadow-sm dark:border-[#0EB29A] dark:bg-[#1C332E] dark:shadow-[0_0_15px_rgba(14,178,154,0.25)]"
+                      : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 dark:border-[#294044] dark:bg-[#15282C] dark:hover:border-[#3E5556] dark:hover:bg-[#183F3E]/40"
                   }`}
                 >
                   <div className="flex items-center gap-3.5">
                     <div
                       className={`w-10 h-10 rounded-[10px] flex items-center justify-center font-mono text-xs font-bold transition-colors ${
                         isSelected
-                          ? "bg-[#0EB29A] text-[#0D191C]"
-                          : "bg-[#233A3D] text-[#8C999A]"
+                          ? "bg-sky-600 text-white dark:bg-[#0EB29A] dark:text-[#0D191C]"
+                          : "bg-slate-100 text-slate-600 dark:bg-[#233A3D] dark:text-[#8C999A]"
                       }`}
                     >
                       {lang.code.toUpperCase()}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm font-bold text-[#F5FDFF]">
+                        <span className="font-mono text-sm font-bold text-slate-900 dark:text-[#F5FDFF]">
                           {lang.name}
                         </span>
-                        <span className="text-xs font-mono text-[#DDF0C2]">
+                        <span className="text-xs font-mono text-sky-700 dark:text-[#DDF0C2] font-semibold">
                           ({lang.native})
                         </span>
                       </div>
-                      <span className="text-[10px] font-mono tracking-wider text-[#8C999A]">
+                      <span className="text-[10px] font-mono tracking-wider text-slate-500 dark:text-[#8C999A]">
                         LOCALE: {lang.region}
                       </span>
                     </div>
@@ -136,8 +140,8 @@ export default function LanguageSelectionPage() {
                   <div
                     className={`w-6 h-6 rounded-full flex items-center justify-center border transition-all ${
                       isSelected
-                        ? "border-[#0EB29A] bg-[#0EB29A] text-[#0D191C]"
-                        : "border-[#294044] bg-[#101F23] text-transparent"
+                        ? "border-sky-600 bg-sky-600 text-white dark:border-[#0EB29A] dark:bg-[#0EB29A] dark:text-[#0D191C]"
+                        : "border-slate-200 bg-slate-100 dark:border-[#294044] dark:bg-[#101F23] text-transparent"
                     }`}
                   >
                     <Check className="w-3.5 h-3.5 stroke-[3]" />
@@ -151,11 +155,11 @@ export default function LanguageSelectionPage() {
 
       {/* Bottom CTA Section */}
       <div className="pt-8 pb-4 space-y-4">
-        <div className="flex items-center justify-between text-[11px] font-mono text-[#8C999A] px-1">
+        <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-[#8C999A] px-1">
           <span className="flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5 text-[#0EB29A]" /> ISO-2859 NDT COMPLIANT
+            <Shield className="w-3.5 h-3.5 text-sky-600 dark:text-[#0EB29A]" /> ISO-2859 NDT COMPLIANT
           </span>
-          <span className="text-[#DDF0C2]">ACTIVE: {selectedLang.toUpperCase()}</span>
+          <span className="text-sky-700 dark:text-[#DDF0C2] font-semibold">ACTIVE: {selectedLang.toUpperCase()}</span>
         </div>
 
         <HudButton
@@ -173,4 +177,3 @@ export default function LanguageSelectionPage() {
     </div>
   );
 }
-
