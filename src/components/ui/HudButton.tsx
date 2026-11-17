@@ -21,21 +21,21 @@ export const HudButton: React.FC<HudButtonProps> = ({
   ...props
 }) => {
   const baseStyles =
-    "inline-flex items-center justify-center font-mono uppercase font-semibold tracking-wider transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed select-none";
+    "inline-flex items-center justify-center font-bold tracking-normal transition-all duration-200 active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed select-none";
 
   const sizeStyles = {
-    sm: "h-9 px-3 text-xs rounded-[8px]",
-    md: "h-12 px-5 text-sm rounded-[12px]",
-    lg: "h-14 px-6 text-sm rounded-[14px]",
+    sm: "h-9 px-3 text-xs rounded-full",
+    md: "h-12 px-5 text-sm rounded-2xl",
+    lg: "h-14 px-6 text-base rounded-2xl",
   };
 
   const variantStyles = {
     primary:
-      "bg-slate-900 text-white hover:bg-slate-800 shadow-sm border border-slate-900 dark:border-transparent dark:bg-[#0EB29A] dark:text-[#0D191C] dark:hover:bg-[#12caa0] dark:shadow-[0_0_15px_rgba(14,178,154,0.35)] font-bold",
+      "brand-gradient text-white shadow-lg shadow-fuchsia-500/30 hover:brightness-110 border-0",
     lime:
-      "bg-sky-600 text-white hover:bg-sky-700 shadow-sm font-bold dark:bg-[#DDF0C2] dark:text-[#0D191C] dark:hover:bg-[#eaffd4] dark:shadow-[0_0_15px_rgba(221,240,194,0.3)]",
+      "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/30 hover:brightness-110 border-0",
     secondary:
-      "bg-white text-slate-800 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 shadow-sm dark:bg-[#233A3D] dark:text-[#F5FDFF] dark:border-[#294044] dark:hover:bg-[#2c474b] dark:hover:border-[#3E5556]",
+      "bg-white text-slate-800 border-2 border-slate-200 hover:border-fuchsia-300 hover:bg-fuchsia-50 shadow-sm dark:bg-[#233A3D] dark:text-[#F5FDFF] dark:border-[#294044] dark:hover:bg-[#2c474b] dark:hover:border-[#DB2777]",
     danger:
       "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 dark:bg-[#2D0A0A] dark:text-[#FF4444] dark:border-[#FF4444]/60 dark:hover:bg-[#3d0e0e]",
     ghost:

@@ -60,7 +60,58 @@ export default function WorkpieceScanPage() {
     }
   }, [startVideoTracking]);
 
+  // 🤖 AUTOMATION 1: if there's no camera/photo after 4s, load a sample board so users never get stuck
+  const userTouchedRef = useRef<boolean>(false);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (!userTouchedRef.current && !cameraActive && !uploadedImageUrl) {
+        handleLoadSamplePcb();
+        setScanMessage("No camera found — I loaded a sample board so you can try the app.");
+      }
+    }, 4000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraActive, uploadedImageUrl]);
+
+  // 🤖 AUTOMATION 2b: for photos/sample boards, lock automatically once confidence is good
+  useEffect(() => {
+    if (!uploadedImageUrl || isLocked || edgeConfidence < 60) return;
+    const t = setTimeout(() => {
+      lockBoundary();
+      setScanMessage("✅ AI outlined your board. Tap Continue — or Unlock to adjust.");
+    }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadedImageUrl, edgeConfidence, isLocked]);
+
+  // 🤖 AUTOMATION 2: auto-lock the outline once the AI detection stays stable for ~1 second
+  const lastPolyRef = useRef<{ x: number; y: number }[] | null>(null);
+  const stableCountRef = useRef<number>(0);
+  useEffect(() => {
+    if (isLocked || edgeConfidence < 60 || activePinIndex !== null) {
+      stableCountRef.current = 0;
+      lastPolyRef.current = polygonCoords;
+      return;
+    }
+    const prev = lastPolyRef.current;
+    if (prev && prev.length === polygonCoords.length) {
+      const maxDelta = polygonCoords.reduce(
+        (m, p, i) => Math.max(m, Math.hypot(p.x - prev[i].x, p.y - prev[i].y)),
+        0
+      );
+      stableCountRef.current = maxDelta < 4 ? stableCountRef.current + 1 : 0;
+    }
+    lastPolyRef.current = polygonCoords;
+    if (stableCountRef.current >= 14) {
+      lockBoundary();
+      stableCountRef.current = 0;
+      setScanMessage("✅ AI locked onto your board automatically. Tap Continue!");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [polygonCoords, edgeConfidence, isLocked, activePinIndex]);
+
   const handlePointerDown = (index: number) => {
+    userTouchedRef.current = true;
     if (isLocked) return;
     setActivePinIndex(index);
   };
@@ -187,6 +238,7 @@ export default function WorkpieceScanPage() {
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    userTouchedRef.current = true;
     const file = e.target.files?.[0];
     if (file) {
       processImageFile(file);
@@ -467,7 +519,7 @@ export default function WorkpieceScanPage() {
             onClick={handleConfirmAndProceed}
             className="flex items-center justify-center gap-2"
           >
-            <span>CONFIRM GEOMETRY → SELECT MATERIAL</span>
+            <span>Continue</span>
             <ArrowRight className="w-4 h-4" />
           </HudButton>
         </div>

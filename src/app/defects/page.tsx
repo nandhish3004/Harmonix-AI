@@ -227,7 +227,7 @@ export default function DefectAnalysisPage() {
             onClick={handleProceed}
             className="flex items-center justify-center gap-2"
           >
-            <span>GENERATE NDT INSPECTION REPORT</span>
+            <span>Create My Report</span>
             <ArrowRight className="w-4 h-4" />
           </HudButton>
         </div>

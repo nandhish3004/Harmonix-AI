@@ -2,71 +2,205 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Mic,
-  MicOff,
-  Volume2,
-  VolumeX,
-  ArrowRight,
-  CheckCircle2,
-  AlertTriangle,
-  Sparkles,
-} from "lucide-react";
+import { Mic, ArrowRight, Volume2, VolumeX, CheckCircle2, AlertTriangle, Sparkles } from "lucide-react";
 import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
-import { HudBadge } from "@/components/ui/HudBadge";
-import { useAudioPitch } from "@/hooks/useAudioPitch";
 import { analyzeTapWithAst } from "@/utils/aiClient";
+import {
+  computeAllModes,
+  getStoredMaterial,
+  getStoredPlateGeometry,
+  getStoredThickness,
+} from "@/utils/physics";
 
-export default function AudioPitchTunerPage() {
+const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+
+function freqToNote(freq: number): string {
+  if (freq <= 0) return "--";
+  const n = Math.round(12 * Math.log2(freq / 440)) + 69;
+  return `${NOTE_NAMES[((n % 12) + 12) % 12]}${Math.floor(n / 12) - 1}`;
+}
+
+type Phase = "idle" | "listening" | "analyzing" | "done" | "failed";
+
+export default function FindItsNotePage() {
   const router = useRouter();
-  const [targetFrequency, setTargetFrequency] = useState<number>(() => {
-    if (typeof window !== "undefined") {
-      const saved = Number(localStorage.getItem("harmonix_peak_freq"));
-      if (Number.isFinite(saved) && saved >= 100) return saved;
-    }
-    return 740;
-  });
-  const [detuneCents, setDetuneCents] = useState<number>(0);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [level, setLevel] = useState<number>(0);
+  const [resultHz, setResultHz] = useState<number | null>(null);
+  const [resultQ, setResultQ] = useState<number | null>(null);
+  const [message, setMessage] = useState<string>("");
   const [isToneOn, setIsToneOn] = useState<boolean>(false);
-  const [isTapTesting, setIsTapTesting] = useState<boolean>(false);
-  const [tapSummary, setTapSummary] = useState<string | null>(null);
+  const [estimatedHz, setEstimatedHz] = useState<number>(740);
+
   const toneCtxRef = useRef<AudioContext | null>(null);
   const oscRef = useRef<OscillatorNode | null>(null);
+  const cancelRef = useRef<boolean>(false);
 
-  const {
-    frequency,
-    isResonant,
-    note,
-    volume,
-    isListening,
-    waveform,
-    startListening,
-    stopListening,
-    setTargetResonance,
-  } = useAudioPitch(targetFrequency);
-
+  // Physics-based estimate used as an honest fallback when the mic can't hear a tap
   useEffect(() => {
-    setTargetResonance(targetFrequency, 12);
-    const cents =
-      frequency > 0 && targetFrequency > 0
-        ? Math.round(1200 * Math.log2(frequency / targetFrequency))
-        : 0;
-    setDetuneCents(Math.min(50, Math.max(-50, cents)));
-    if (oscRef.current && toneCtxRef.current) {
-      oscRef.current.frequency.setValueAtTime(targetFrequency, toneCtxRef.current.currentTime);
-    }
-  }, [frequency, targetFrequency, setTargetResonance]);
-
-  useEffect(() => {
+    const modes = computeAllModes(
+      getStoredMaterial(),
+      getStoredThickness(),
+      getStoredPlateGeometry().areaMm2,
+      getStoredPlateGeometry().aspectRatio,
+      0
+    );
+    const m22 = modes.find((m) => m.id === "mode-2-2") ?? modes[2];
+    setEstimatedHz(m22.freqHz);
     return () => {
+      cancelRef.current = true;
       oscRef.current?.stop();
       toneCtxRef.current?.close().catch(() => {});
     };
   }, []);
 
-  const toggleReferenceTone = async () => {
+  const saveResult = (hz: number, q: number | null) => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("harmonix_measured_freq", String(hz));
+    localStorage.setItem("harmonix_peak_freq", String(hz));
+    if (q) localStorage.setItem("harmonix_measured_q", String(q));
+  };
+
+  const useEstimate = () => {
+    setResultHz(estimatedHz);
+    setResultQ(null);
+    saveResult(estimatedHz, null);
+    setPhase("done");
+    setMessage(
+      `Using the physics estimate (${estimatedHz} Hz) calculated from your material, thickness and scanned size.`
+    );
+  };
+
+  const runTapListen = async () => {
+    cancelRef.current = false;
+    setResultHz(null);
+    setResultQ(null);
+    setPhase("listening");
+    setMessage("Tap your board once with a pen or finger — I'm listening…");
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setPhase("failed");
+      setMessage("This browser can't access the microphone.");
+      return;
+    }
+
+    let stream: MediaStream | null = null;
+    let ctx: AudioContext | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      ctx = new AudioCtx();
+      if (ctx.state === "suspended") await ctx.resume();
+      const sampleRate = ctx.sampleRate;
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 4096;
+      src.connect(analyser);
+      const buf = new Float32Array(analyser.fftSize);
+
+      // Measure ambient noise for ~0.4s, then wait up to 6s for a clear impact
+      let ambient = 0.004;
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 60));
+        analyser.getFloatTimeDomainData(buf);
+        let s = 0;
+        for (let k = 0; k < buf.length; k++) s += buf[k] * buf[k];
+        ambient = Math.max(ambient, Math.sqrt(s / buf.length));
+      }
+      const threshold = Math.max(0.03, ambient * 4);
+
+      let impactFound = false;
+      const startT = performance.now();
+      while (performance.now() - startT < 6000 && !cancelRef.current) {
+        await new Promise((r) => setTimeout(r, 25));
+        analyser.getFloatTimeDomainData(buf);
+        let s = 0;
+        for (let k = 0; k < buf.length; k++) s += buf[k] * buf[k];
+        const rms = Math.sqrt(s / buf.length);
+        setLevel(Math.min(1, rms * 12));
+        if (rms > threshold) {
+          impactFound = true;
+          break;
+        }
+      }
+
+      if (!impactFound) {
+        setPhase("failed");
+        setMessage(
+          cancelRef.current
+            ? ""
+            : "I didn't hear a tap. Try tapping closer to the phone's mic, or use the physics estimate."
+        );
+        return;
+      }
+
+      setPhase("analyzing");
+      setMessage("Got it! Analyzing the ring…");
+      await new Promise((r) => setTimeout(r, 180));
+      analyser.getFloatTimeDomainData(buf);
+      const samples = Array.from(buf);
+
+      // Try the Python AI backend (Hugging Face AST) first, then local DFT
+      const ai = await analyzeTapWithAst(samples, sampleRate, estimatedHz);
+      let hz = 0;
+      let q: number | null = null;
+      if (ai && ai.peak_hz > 0) {
+        hz = Math.round(ai.peak_hz);
+      } else {
+        // Hann-windowed DFT sweep + −3 dB bandwidth Q estimate
+        const N = 4096;
+        const spec: { f: number; p: number }[] = [];
+        let bestI = 0;
+        let bestP = -1;
+        for (let f = 100; f <= 3000; f += 8) {
+          let re = 0;
+          let im = 0;
+          const w = (2 * Math.PI * f) / sampleRate;
+          for (let i = 0; i < N; i += 2) {
+            const hann = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (N - 1)));
+            const v = samples[i] * hann;
+            re += v * Math.cos(w * i);
+            im -= v * Math.sin(w * i);
+          }
+          const p = re * re + im * im;
+          if (p > bestP) {
+            bestP = p;
+            bestI = spec.length;
+          }
+          spec.push({ f, p });
+        }
+        hz = spec[bestI]?.f ?? estimatedHz;
+        const half = bestP * 0.5;
+        let l = bestI;
+        while (l > 0 && spec[l].p > half) l--;
+        let r = bestI;
+        while (r < spec.length - 1 && spec[r].p > half) r++;
+        const bw = Math.max(8, spec[r].f - spec[l].f);
+        q = Math.max(5, Math.round(hz / bw));
+      }
+
+      setResultHz(hz);
+      setResultQ(q);
+      saveResult(hz, q);
+      setPhase("done");
+      setMessage("");
+    } catch {
+      setPhase("failed");
+      setMessage("Microphone permission was blocked. Allow it in your browser, or use the physics estimate.");
+    } finally {
+      stream?.getTracks().forEach((t) => t.stop());
+      ctx?.close().catch(() => {});
+    }
+  };
+
+  const togglePlay = async () => {
+    const hz = resultHz ?? estimatedHz;
     if (isToneOn) {
       oscRef.current?.stop();
       oscRef.current = null;
@@ -79,13 +213,11 @@ export default function AudioPitchTunerPage() {
     if (!toneCtxRef.current || toneCtxRef.current.state === "closed") {
       toneCtxRef.current = new AudioCtx();
     }
-    if (toneCtxRef.current.state === "suspended") {
-      await toneCtxRef.current.resume();
-    }
+    if (toneCtxRef.current.state === "suspended") await toneCtxRef.current.resume();
     const osc = toneCtxRef.current.createOscillator();
     const gain = toneCtxRef.current.createGain();
     osc.type = "sine";
-    osc.frequency.setValueAtTime(targetFrequency, toneCtxRef.current.currentTime);
+    osc.frequency.setValueAtTime(hz, toneCtxRef.current.currentTime);
     gain.gain.setValueAtTime(0.35, toneCtxRef.current.currentTime);
     osc.connect(gain);
     gain.connect(toneCtxRef.current.destination);
@@ -94,319 +226,103 @@ export default function AudioPitchTunerPage() {
     setIsToneOn(true);
   };
 
-  // Capture 0.8s tap-test impulse and run HuggingFace AST (or browser FFT fallback)
-  const handleTapTest = async () => {
-    setIsTapTesting(true);
-    setTapSummary("Tap the plate once now — listening for ring-down...");
-    try {
-      let samples: number[] = [];
-      let sampleRate = 16000;
-
-      if (navigator.mediaDevices?.getUserMedia) {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          const AudioCtx =
-            window.AudioContext ||
-            (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-          const ctx = new AudioCtx({ sampleRate: 16000 });
-          sampleRate = ctx.sampleRate;
-          const src = ctx.createMediaStreamSource(stream);
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 2048;
-          src.connect(analyser);
-
-          const chunk = new Float32Array(analyser.fftSize);
-          for (let k = 0; k < 6; k++) {
-            await new Promise((r) => setTimeout(r, 120));
-            analyser.getFloatTimeDomainData(chunk);
-            samples.push(...Array.from(chunk));
-          }
-          stream.getTracks().forEach((t) => t.stop());
-          ctx.close().catch(() => {});
-        } catch {
-          samples = [];
-        }
-      }
-
-      if (samples.length < 256) {
-        // Synthetic damped impulse fallback around current target
-        const f = targetFrequency;
-        samples = Array.from({ length: 2048 }, (_, i) =>
-          Math.exp(-i / 600) * Math.sin((2 * Math.PI * f * i) / 16000)
-        );
-      }
-
-      const aiRes = await analyzeTapWithAst(samples.slice(0, 4096), sampleRate, targetFrequency);
-      if (aiRes) {
-        setTargetFrequency(Math.round(aiRes.peak_hz));
-        if (typeof window !== "undefined") {
-          localStorage.setItem("harmonix_measured_freq", String(Math.round(aiRes.peak_hz)));
-          localStorage.setItem("harmonix_ast_class", `${aiRes.ast_top_class} (${Math.round(aiRes.ast_confidence * 100)}%)`);
-        }
-        setTapSummary(
-          `HuggingFace AST locked ${aiRes.peak_hz} Hz • ${aiRes.ast_top_class} (${Math.round(aiRes.ast_confidence * 100)}%)`
-        );
-      } else {
-        // Real in-browser Hann-windowed DFT peak + -3dB bandwidth Q-factor extraction
-        const slice = samples.slice(0, 2048);
-        const spectrum: { f: number; power: number }[] = [];
-        let bestIdx = 0;
-        let bestPower = -1;
-        const nLen = slice.length;
-
-        for (let f = 100; f <= 2400; f += 10) {
-          let re = 0;
-          let im = 0;
-          const w = (2 * Math.PI * f) / sampleRate;
-          for (let i = 0; i < nLen; i += 2) {
-            const hann = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (nLen - 1)));
-            const v = slice[i] * hann;
-            re += v * Math.cos(w * i);
-            im -= v * Math.sin(w * i);
-          }
-          const power = re * re + im * im;
-          if (power > bestPower) {
-            bestPower = power;
-            bestIdx = spectrum.length;
-          }
-          spectrum.push({ f, power });
-        }
-
-        const bestFreq = spectrum[bestIdx]?.f ?? targetFrequency;
-        const halfPower = bestPower * 0.5; // -3dB power threshold
-        let leftIdx = bestIdx;
-        while (leftIdx > 0 && spectrum[leftIdx].power > halfPower) leftIdx--;
-        let rightIdx = bestIdx;
-        while (rightIdx < spectrum.length - 1 && spectrum[rightIdx].power > halfPower) rightIdx++;
-
-        const bwHz = Math.max(10, (spectrum[rightIdx]?.f ?? bestFreq) - (spectrum[leftIdx]?.f ?? bestFreq));
-        const qExp = Math.max(5, Math.round(bestFreq / bwHz));
-
-        setTargetFrequency(bestFreq);
-        if (typeof window !== "undefined") {
-          localStorage.setItem("harmonix_measured_freq", String(bestFreq));
-          localStorage.setItem("harmonix_measured_q", String(qExp));
-        }
-        setTapSummary(`Tap-Test FFT: f₀ = ${bestFreq} Hz // Δf(-3dB) = ${bwHz} Hz // Q ≈ ${qExp}`);
-      }
-    } finally {
-      setIsTapTesting(false);
-    }
-  };
+  const ringQuality =
+    resultQ === null ? null : resultQ >= 60 ? "Long, clean ring — board feels solid ✓" : resultQ >= 25 ? "Normal ring" : "Short, dull ring — possible damping or damage ⚠";
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#0D191C] flex flex-col transition-colors duration-200">
-      <HudHeader
-        title="PITCH DETECTOR"
-        step="SCREEN 05 // 10"
-        subtitle="Acoustic Frequency Tuning & Lock"
-        backHref="/viewport"
-        rightAction={
-          <HudBadge variant={isResonant ? "safe" : "danger"} dot>
-            {isResonant ? "RESONANCE LOCKED" : "OFF-PEAK"}
-          </HudBadge>
-        }
-      />
+    <div className="min-h-screen flex flex-col">
+      <HudHeader title="Find Its Note" step="SCREEN 05 // 10" backHref="/viewport" />
 
       <div className="p-4 space-y-4 flex-1 flex flex-col">
-        {/* Main Central Pitch Strobe Gauge */}
-        <div className="relative w-full py-8 bg-white dark:bg-[#15282C] rounded-[20px] border border-slate-200 dark:border-[#294044] flex flex-col items-center justify-center shadow-sm dark:shadow-lg transition-colors">
-          {/* Note Display */}
-          <div className="text-center space-y-1">
-            <span className="text-[10px] font-mono tracking-widest text-sky-600 dark:text-[#0EB29A] uppercase font-semibold">
-              FUNDAMENTAL NOTE
-            </span>
-            <div className="text-5xl font-black font-mono text-slate-900 dark:text-[#F5FDFF] tracking-tighter flex items-center justify-center gap-1">
-              <span>{note}</span>
-              <span className="text-xs text-slate-500 dark:text-[#8C999A] font-normal">
-                {detuneCents >= 0 ? `+${detuneCents}` : detuneCents}¢
+        {/* Hero tap button */}
+        <ChamferedCard className="py-8 px-4 flex flex-col items-center text-center gap-4 overflow-hidden">
+          <div className="relative">
+            {phase === "listening" && (
+              <>
+                <span className="absolute inset-0 rounded-full brand-gradient opacity-30 animate-ping" />
+                <span
+                  className="absolute -inset-3 rounded-full border-4 border-fuchsia-400/60"
+                  style={{ transform: `scale(${1 + level * 0.35})`, transition: "transform 60ms" }}
+                />
+              </>
+            )}
+            <button
+              onClick={runTapListen}
+              disabled={phase === "listening" || phase === "analyzing"}
+              className="relative w-36 h-36 rounded-full brand-gradient shadow-2xl shadow-fuchsia-500/40 text-white flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform disabled:opacity-90"
+            >
+              <Mic className="w-9 h-9" />
+              <span className="text-sm font-extrabold">
+                {phase === "listening" ? "Listening…" : phase === "analyzing" ? "Analyzing…" : phase === "done" ? "Tap again" : "Tap & Listen"}
               </span>
-            </div>
-            <div className="text-sm font-mono font-bold text-sky-700 dark:text-[#DDF0C2]">
-              {frequency} Hz
-            </div>
+            </button>
           </div>
 
-          {/* Cents Tuning Meter */}
-          <div className="w-64 mt-6">
-            <div className="flex justify-between text-[10px] font-mono text-slate-500 dark:text-[#8C999A] mb-1.5">
-              <span>-50¢ (FLAT)</span>
-              <span className="text-sky-600 dark:text-[#0EB29A] font-semibold">IN TUNE</span>
-              <span>+50¢ (SHARP)</span>
+          {message && <p className="text-sm font-semibold text-slate-700 dark:text-[#DDF0C2] px-2">{message}</p>}
+
+          {phase === "idle" && (
+            <p className="text-xs text-slate-500 dark:text-[#8C999A] px-4">
+              Press the button, then tap your board once. AI listens for the ring and finds its natural note.
+            </p>
+          )}
+
+          {phase === "failed" && (
+            <HudButton variant="secondary" size="md" onClick={useEstimate} className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4" />
+              <span>Use AI physics estimate</span>
+            </HudButton>
+          )}
+        </ChamferedCard>
+
+        {/* Plain-English result */}
+        {phase === "done" && resultHz && (
+          <ChamferedCard variant="safe" className="p-4 space-y-2 pop-in">
+            <div className="flex items-center gap-2 font-extrabold">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+              <span>Your board's note: {freqToNote(resultHz)}</span>
             </div>
-            <div className="relative w-full h-2.5 bg-slate-200 dark:bg-[#101F23] rounded-full border border-slate-300 dark:border-[#233A3D] overflow-hidden">
-              {/* Center in-tune tick */}
-              <div className="absolute left-1/2 top-0 bottom-0 w-1 bg-sky-600 dark:bg-[#0EB29A] -translate-x-1/2 z-10" />
-              {/* Pointer indicator */}
-              <div
-                className={`absolute top-0 bottom-0 w-3 rounded-full transition-all duration-150 ${
-                  isResonant ? "bg-emerald-600 dark:bg-[#4ADE80] shadow-[0_0_10px_#4ADE80]" : "bg-red-600 dark:bg-[#FF4444]"
-                }`}
-                style={{
-                  left: `${Math.min(95, Math.max(5, 50 + detuneCents))}%`,
-                  transform: "translateX(-50%)",
-                }}
-              />
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="rounded-2xl bg-white/70 dark:bg-black/20 p-3">
+                <span className="text-[11px] text-slate-500 block">Pitch</span>
+                <span className="text-xl font-extrabold">{resultHz} Hz</span>
+              </div>
+              <div className="rounded-2xl bg-white/70 dark:bg-black/20 p-3">
+                <span className="text-[11px] text-slate-500 block">Ring quality</span>
+                <span className="text-xl font-extrabold">{resultQ ? `Q ${resultQ}` : "—"}</span>
+              </div>
             </div>
-          </div>
+            {ringQuality && <p className="text-xs font-semibold">{ringQuality}</p>}
 
-          {/* Live 32-Bar Audio Waveform Visualizer */}
-          <div className="w-64 h-10 mt-4 flex items-end justify-center gap-[3px] px-2">
-            {waveform.map((v, idx) => (
-              <div
-                key={idx}
-                className={`w-1.5 rounded-t-sm transition-all duration-75 ${
-                  isListening
-                    ? isResonant
-                      ? "bg-emerald-500 dark:bg-[#4ADE80]"
-                      : "bg-sky-500 dark:bg-[#0EB29A]"
-                    : "bg-slate-300 dark:bg-[#233A3D]"
-                }`}
-                style={{ height: `${Math.max(12, Math.round(v * 100))}%` }}
-              />
-            ))}
-          </div>
+            <button
+              onClick={togglePlay}
+              className="flex items-center gap-1.5 text-xs font-bold text-fuchsia-700 dark:text-[#F9A8D4]"
+            >
+              {isToneOn ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              {isToneOn ? "Stop sound" : "Play this note"}
+            </button>
+          </ChamferedCard>
+        )}
 
-          {/* Audio input level readout */}
-          <div className="flex items-center gap-2 mt-5 text-[10px] font-mono text-slate-500 dark:text-[#8C999A]">
-            <Volume2 className="w-3.5 h-3.5 text-sky-600 dark:text-[#0EB29A]" />
-            <span>MIC LEVEL:</span>
-            <div className="w-20 h-1.5 bg-slate-200 dark:bg-[#101F23] rounded-full overflow-hidden border border-slate-300 dark:border-[#233A3D]">
-              <div
-                className="h-full bg-sky-600 dark:bg-[#0EB29A] transition-all duration-150"
-                style={{ width: `${Math.min(100, volume * 100)}%` }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Microphone, Tap-Test AST & Reference Tone Controls */}
-        <div className="grid grid-cols-3 gap-2">
-          <HudButton
-            variant={isListening ? "danger" : "primary"}
-            size="md"
-            onClick={isListening ? stopListening : startListening}
-            className="flex items-center justify-center gap-1 px-1.5"
-          >
-            {isListening ? (
-              <>
-                <MicOff className="w-3.5 h-3.5" />
-                <span className="text-[10px]">STOP MIC</span>
-              </>
-            ) : (
-              <>
-                <Mic className="w-3.5 h-3.5 text-white dark:text-[#0D191C]" />
-                <span className="text-[10px]">LIVE MIC</span>
-              </>
-            )}
-          </HudButton>
-
-          <HudButton
-            variant="secondary"
-            size="md"
-            isLoading={isTapTesting}
-            onClick={handleTapTest}
-            className="flex items-center justify-center gap-1 px-1.5"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-sky-600 dark:text-[#DDF0C2]" />
-            <span className="text-[10px]">TAP TEST</span>
-          </HudButton>
-
-          <HudButton
-            variant={isToneOn ? "danger" : "secondary"}
-            size="md"
-            onClick={toggleReferenceTone}
-            className="flex items-center justify-center gap-1 px-1.5"
-          >
-            {isToneOn ? (
-              <>
-                <VolumeX className="w-3.5 h-3.5" />
-                <span className="text-[10px]">STOP</span>
-              </>
-            ) : (
-              <>
-                <Volume2 className="w-3.5 h-3.5 text-sky-600 dark:text-[#0EB29A]" />
-                <span className="text-[10px]">{targetFrequency}Hz</span>
-              </>
-            )}
-          </HudButton>
-        </div>
-
-        {tapSummary && (
-          <div className="px-3 py-2 rounded-[8px] bg-sky-50 dark:bg-[#15282C] border border-sky-200 dark:border-[#0EB29A]/50 text-[11px] font-mono text-sky-800 dark:text-[#DDF0C2]">
-            {tapSummary}
+        {phase === "failed" && (
+          <div className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300 px-1">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>Tip: a quiet room and a firm single tap near the mic work best.</span>
           </div>
         )}
 
-        {/* Target Frequency Slider Control */}
-        <ChamferedCard className="p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-slate-600 dark:text-[#8C999A] uppercase tracking-wider font-semibold">
-              TARGET HARMONIC LOCK (f₀)
-            </span>
-            <span className="text-sm font-mono font-bold text-sky-700 dark:text-[#0EB29A]">
-              {targetFrequency} HZ
-            </span>
-          </div>
-
-          <input
-            type="range"
-            min="100"
-            max="3000"
-            step="1"
-            value={targetFrequency}
-            onChange={(e) => setTargetFrequency(Number(e.target.value))}
-            className="w-full accent-sky-600 dark:accent-[#0EB29A] bg-slate-200 dark:bg-[#101F23] h-2 rounded-lg cursor-pointer"
-          />
-
-          <div className="flex justify-between text-[10px] font-mono text-slate-500 dark:text-[#8C999A]">
-            <span>100 HZ</span>
-            <span className="text-slate-700 dark:text-[#DDF0C2] font-semibold">FINE RESOLUTION ±1 HZ</span>
-            <span>3000 HZ</span>
-          </div>
-        </ChamferedCard>
-
-        {/* Target Resonance Status Card */}
-        <ChamferedCard
-          variant={isResonant ? "safe" : "danger"}
-          className="p-3.5 flex items-center justify-between"
-        >
-          <div className="flex items-center gap-3">
-            {isResonant ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-[#4ADE80]" />
-            ) : (
-              <AlertTriangle className="w-5 h-5 text-red-600 dark:text-[#FF4444]" />
-            )}
-            <div>
-              <span className="text-xs font-mono font-bold uppercase block">
-                {isResonant ? "NATURAL FREQUENCY MATCHED" : "SEEKING HARMONIC RESONANCE"}
-              </span>
-              <span className="text-[10px] font-mono opacity-80">
-                {isResonant
-                  ? "Acoustic energy concentrated into stable Chladni nodal lines."
-                  : "Frequency deviation > 12 Hz. Adjust slider to match peak."}
-              </span>
-            </div>
-          </div>
-        </ChamferedCard>
-
-        {/* Proceed CTA */}
         <div className="pt-2 mt-auto">
           <HudButton
             variant="primary"
             size="lg"
             fullWidth
             onClick={() => {
-              if (typeof window !== "undefined") {
-                localStorage.setItem("harmonix_measured_freq", String(frequency));
-                localStorage.setItem("harmonix_peak_freq", String(targetFrequency));
-              }
-              if (isToneOn) toggleReferenceTone();
+              if (!resultHz) saveResult(estimatedHz, null);
+              if (isToneOn) togglePlay();
               router.push("/modes");
             }}
             className="flex items-center justify-center gap-2"
           >
-            <span>INSPECT HARMONIC MODES GALLERY</span>
+            <span>{resultHz ? "Next: Vibration Shapes" : "Skip — let AI estimate"}</span>
             <ArrowRight className="w-4 h-4" />
           </HudButton>
         </div>

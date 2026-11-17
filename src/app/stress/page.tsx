@@ -253,7 +253,7 @@ export default function StressHeatmapPage() {
             onClick={() => router.push("/defects")}
             className="flex items-center justify-center gap-2"
           >
-            <span>RUN SUBSURFACE DEFECT CORRELATION</span>
+            <span>Continue to Health Check</span>
             <ArrowRight className="w-4 h-4" />
           </HudButton>
         </div>

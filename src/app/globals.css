@@ -21,10 +21,36 @@
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-geist-sans), -apple-system, "Segoe UI", Roboto, sans-serif;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
+
+/* Brand gradient (Swiggy/Instamart-style vibrant) */
+.brand-gradient {
+  background: linear-gradient(135deg, #7C3AED 0%, #DB2777 50%, #F97316 100%);
+}
+.brand-gradient-soft {
+  background: linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(219,39,119,0.10) 50%, rgba(249,115,22,0.10) 100%);
+}
+.brand-text {
+  background: linear-gradient(90deg, #7C3AED, #DB2777, #F97316);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@keyframes pop-in {
+  0% { transform: scale(0.92); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.pop-in { animation: pop-in 0.25s ease-out both; }
+
+@keyframes float-y {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+.float-y { animation: float-y 2.4s ease-in-out infinite; }
 
 /* Custom chamfer clip-path */
 .clip-chamfer {

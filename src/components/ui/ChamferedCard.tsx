@@ -17,9 +17,9 @@ export const ChamferedCard: React.FC<ChamferedCardProps> = ({
 }) => {
   const variantStyles = {
     default:
-      "bg-white border-slate-200 text-slate-900 shadow-sm dark:bg-[#15282C] dark:border-[#294044] dark:text-[#F5FDFF] dark:shadow-none",
+      "bg-white border-slate-100 text-slate-900 shadow-md shadow-slate-200/70 dark:bg-[#15282C] dark:border-[#294044] dark:text-[#F5FDFF] dark:shadow-none",
     active:
-      "bg-sky-50/80 border-sky-500 text-slate-900 shadow-sm dark:bg-[#1C332E] dark:border-[#0EB29A] dark:text-[#F5FDFF] dark:shadow-hud",
+      "bg-fuchsia-50 border-fuchsia-500 border-2 text-slate-900 shadow-lg shadow-fuchsia-300/40 dark:bg-[#2A1B33] dark:border-[#DB2777] dark:text-[#F5FDFF]",
     danger:
       "bg-red-50/90 border-red-200 text-red-800 dark:bg-[#2D0A0A] dark:border-[#FF4444]/60 dark:text-[#FF8888]",
     safe:
@@ -30,7 +30,7 @@ export const ChamferedCard: React.FC<ChamferedCardProps> = ({
 
   const chamferClass = cornerChamfer
     ? "clip-chamfer border"
-    : "rounded-[16px] border";
+    : "rounded-3xl border";
 
   return (
     <div

@@ -1,117 +1,142 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Check,
-  ArrowRight,
-} from "lucide-react";
+import { Check, ArrowRight, Sparkles } from "lucide-react";
 import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
+import { MATERIAL_CONSTANTS, MaterialData } from "@/utils/physics";
 
-interface MaterialConfig {
-  id: string;
-  name: string;
-  code: string;
-  category: string;
-  youngsModulusGpa: number;
-  densityKgM3: number;
-  poissonRatio: number;
-  acousticSpeedMs: number;
-  description: string;
+interface MaterialConfig extends MaterialData {
+  emoji: string;
+  plain: string;
+  tag: string;
 }
 
 const MATERIALS: MaterialConfig[] = [
   {
     id: "fr4",
-    name: "FR4 Glass Epoxy",
+    emoji: "🟩",
+    name: "Circuit Board (FR4)",
     code: "PCB-FR4-STD",
     category: "CIRCUIT SUBSTRATE",
     youngsModulusGpa: 24.0,
     densityKgM3: 1850,
     poissonRatio: 0.12,
     acousticSpeedMs: 3600,
-    description: "Standard woven fiberglass cloth with epoxy resin binder.",
+    plain: "The green board inside phones, laptops & gadgets.",
+    tag: "Most common",
+    ...MATERIAL_CONSTANTS.fr4,
   },
   {
     id: "al6061",
-    name: "Aluminum 6061-T6",
+    emoji: "⬜",
+    name: "Aluminium Plate",
     code: "AL-6061-T6",
     category: "AEROSPACE ALLOY",
     youngsModulusGpa: 68.9,
     densityKgM3: 2700,
     poissonRatio: 0.33,
     acousticSpeedMs: 5050,
-    description: "Precipitation-hardened aluminum alloy with high strength-to-weight ratio.",
+    plain: "Light, strong silver metal — brackets, frames, heat-sinks.",
+    tag: "Light metal",
+    ...MATERIAL_CONSTANTS.al6061,
   },
   {
     id: "steel",
-    name: "Structural Carbon Steel",
+    emoji: "🔩",
+    name: "Steel Plate",
     code: "STEEL-AISI-1018",
     category: "FERROUS ALLOY",
     youngsModulusGpa: 200.0,
     densityKgM3: 7850,
     poissonRatio: 0.29,
     acousticSpeedMs: 5120,
-    description: "Cold-drawn mild steel with uniform elasticity and high density.",
+    plain: "Very stiff and heavy — machine parts & structures.",
+    tag: "Heavy duty",
+    ...MATERIAL_CONSTANTS.steel,
   },
   {
     id: "acrylic",
-    name: "Cast Acrylic (PMMA)",
+    emoji: "🔷",
+    name: "Acrylic Sheet",
     code: "PMMA-CAST",
     category: "POLYMER",
     youngsModulusGpa: 3.2,
     densityKgM3: 1180,
     poissonRatio: 0.37,
     acousticSpeedMs: 2730,
-    description: "Optically clear thermoplastic with high damping and lower resonance peaks.",
+    plain: "Clear plastic — displays, covers & enclosures.",
+    tag: "Flexible",
+    ...MATERIAL_CONSTANTS.acrylic,
   },
 ];
+
+const THICKNESS_PRESETS = [
+  { mm: 0.8, label: "Thin", sub: "0.8 mm" },
+  { mm: 1.6, label: "Standard", sub: "1.6 mm" },
+  { mm: 3.0, label: "Thick", sub: "3.0 mm" },
+  { mm: 5.0, label: "Very thick", sub: "5.0 mm" },
+];
+
+function Meter({ label, value, from, to }: { label: string; value: number; from: string; to: string }) {
+  return (
+    <div>
+      <div className="flex justify-between text-[10px] font-semibold text-slate-500 dark:text-[#8C999A] mb-0.5">
+        <span>{label}</span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-[#233A3D] overflow-hidden">
+        <div
+          className="h-full rounded-full"
+          style={{
+            width: `${Math.max(6, Math.min(100, value * 100))}%`,
+            background: `linear-gradient(90deg, ${from}, ${to})`,
+          }}
+        />
+      </div>
+    </div>
+  );
+}
 
 export default function MaterialSelectionPage() {
   const router = useRouter();
   const [selectedMaterialId, setSelectedMaterialId] = useState<string>("fr4");
   const [thicknessMm, setThicknessMm] = useState<number>(1.6);
+  const [area, setArea] = useState<number | null>(null);
 
-  const selectedMaterial =
-    MATERIALS.find((m) => m.id === selectedMaterialId) || MATERIALS[0];
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const a = Number(localStorage.getItem("harmonix_plate_area"));
+      if (Number.isFinite(a) && a > 0) setArea(a);
+    }
+  }, []);
 
-  // Flexural plate rigidity: D = E * h^3 / (12 * (1 - nu^2))
-  const flexuralRigidity = (
-    (selectedMaterial.youngsModulusGpa * 1e9 * Math.pow(thicknessMm * 1e-3, 3)) /
-    (12 * (1 - Math.pow(selectedMaterial.poissonRatio, 2)))
-  ).toFixed(2);
+  const selected = MATERIALS.find((m) => m.id === selectedMaterialId) || MATERIALS[0];
 
   const handleConfirm = () => {
     if (typeof window !== "undefined") {
-      localStorage.setItem("harmonix_material", JSON.stringify(selectedMaterial));
+      localStorage.setItem("harmonix_material", JSON.stringify(selected));
       localStorage.setItem("harmonix_thickness", String(thicknessMm));
     }
     router.push("/viewport");
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#0D191C] flex flex-col transition-colors duration-200">
-      <HudHeader
-        title="MATERIAL MATRIX"
-        step="SCREEN 03 // 10"
-        subtitle="Physical Constants & Rigidity Setup"
-        backHref="/scan"
-      />
+    <div className="min-h-screen flex flex-col">
+      <HudHeader title="Pick Material" step="SCREEN 03 // 10" backHref="/scan" />
 
       <div className="p-4 space-y-4 flex-1">
-        <div>
-          <span className="text-xs font-mono text-slate-600 dark:text-[#8C999A] uppercase tracking-wider block mb-1 font-semibold">
-            WORKPIECE SUBSTRATE SELECTION
+        {/* AI recommendation */}
+        <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl brand-gradient-soft border border-fuchsia-200 dark:border-[#DB2777]/40 text-[12px] font-semibold text-fuchsia-900 dark:text-[#F5FDFF]">
+          <Sparkles className="w-4 h-4 text-fuchsia-600 shrink-0" />
+          <span>
+            AI suggests <b>Circuit Board (FR4), Standard</b>
+            {area ? ` for your ${Math.round(area / 100) / 10} cm² scan` : ""}. Just tap Continue, or choose another.
           </span>
-          <p className="text-xs font-mono text-slate-600 dark:text-[#8C999A]">
-            Select mechanical composition to calibrate speed of sound and theoretical Chladni nodal harmonics.
-          </p>
         </div>
 
-        {/* 4 Material Cards */}
-        <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
           {MATERIALS.map((mat) => {
             const isSelected = selectedMaterialId === mat.id;
             return (
@@ -119,56 +144,31 @@ export default function MaterialSelectionPage() {
                 key={mat.id}
                 type="button"
                 onClick={() => setSelectedMaterialId(mat.id)}
-                className="w-full text-left focus:outline-none transition-all"
+                className="text-left focus:outline-none active:scale-[0.97] transition-transform"
               >
                 <ChamferedCard
                   variant={isSelected ? "active" : "default"}
-                  className="p-3.5 border transition-all"
+                  className="p-3.5 h-full flex flex-col gap-2"
                 >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] font-mono tracking-widest text-sky-600 dark:text-[#0EB29A] uppercase font-semibold">
-                        {mat.category}
+                  <div className="flex items-start justify-between">
+                    <span className="text-3xl leading-none">{mat.emoji}</span>
+                    {isSelected ? (
+                      <span className="w-6 h-6 rounded-full brand-gradient flex items-center justify-center text-white">
+                        <Check className="w-3.5 h-3.5 stroke-[3]" />
                       </span>
-                      <h3 className="text-sm font-bold font-mono text-slate-900 dark:text-[#F5FDFF]">
-                        {mat.name}
-                      </h3>
-                    </div>
-
-                    <div
-                      className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all ${
-                        isSelected
-                          ? "border-sky-600 bg-sky-600 text-white dark:border-[#0EB29A] dark:bg-[#0EB29A] dark:text-[#0D191C]"
-                          : "border-slate-200 bg-slate-100 dark:border-[#294044] dark:bg-[#101F23] text-transparent"
-                      }`}
-                    >
-                      <Check className="w-3.5 h-3.5 stroke-[3]" />
-                    </div>
+                    ) : (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-[#233A3D] text-slate-500 dark:text-[#8C999A]">
+                        {mat.tag}
+                      </span>
+                    )}
                   </div>
-
-                  <p className="text-[11px] font-mono text-slate-600 dark:text-[#8C999A] mt-1.5 leading-snug">
-                    {mat.description}
-                  </p>
-
-                  <div className="grid grid-cols-3 gap-2 mt-3 pt-2.5 border-t border-slate-200 dark:border-[#294044]/60 text-[10px] font-mono">
-                    <div>
-                      <span className="text-slate-500 dark:text-[#8C999A] block">MODULUS (E)</span>
-                      <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">
-                        {mat.youngsModulusGpa} GPa
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 dark:text-[#8C999A] block">DENSITY (ρ)</span>
-                      <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">
-                        {mat.densityKgM3} kg/m³
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 dark:text-[#8C999A] block">WAVE SPEED (c)</span>
-                      <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">
-                        {mat.acousticSpeedMs} m/s
-                      </span>
-                    </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold leading-tight">{mat.name}</h3>
+                    <p className="text-[11px] text-slate-500 dark:text-[#8C999A] leading-snug mt-0.5">{mat.plain}</p>
+                  </div>
+                  <div className="space-y-1.5 mt-auto pt-1">
+                    <Meter label="Stiffness" value={mat.youngsModulusGpa / 200} from="#22D3EE" to="#7C3AED" />
+                    <Meter label="Weight" value={mat.densityKgM3 / 7850} from="#FBBF24" to="#F97316" />
                   </div>
                 </ChamferedCard>
               </button>
@@ -176,40 +176,30 @@ export default function MaterialSelectionPage() {
           })}
         </div>
 
-        {/* Thickness Slider Control */}
-        <ChamferedCard className="p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-slate-600 dark:text-[#8C999A] uppercase tracking-wider font-semibold">
-              PLATE THICKNESS (h)
-            </span>
-            <span className="text-sm font-mono font-bold text-sky-700 dark:text-[#0EB29A]">
-              {thicknessMm.toFixed(1)} mm
-            </span>
+        {/* Thickness chips */}
+        <div>
+          <span className="text-sm font-extrabold block mb-2">How thick is it?</span>
+          <div className="grid grid-cols-4 gap-2">
+            {THICKNESS_PRESETS.map((t) => {
+              const on = thicknessMm === t.mm;
+              return (
+                <button
+                  key={t.mm}
+                  onClick={() => setThicknessMm(t.mm)}
+                  className={`rounded-2xl py-2.5 px-1 text-center border-2 transition-all active:scale-95 ${
+                    on
+                      ? "brand-gradient text-white border-transparent shadow-md shadow-fuchsia-400/40"
+                      : "bg-white dark:bg-[#15282C] border-slate-200 dark:border-[#294044] text-slate-700 dark:text-[#F5FDFF]"
+                  }`}
+                >
+                  <span className="block text-xs font-extrabold">{t.label}</span>
+                  <span className={`block text-[10px] ${on ? "text-white/90" : "text-slate-500"}`}>{t.sub}</span>
+                </button>
+              );
+            })}
           </div>
+        </div>
 
-          <input
-            type="range"
-            min="0.8"
-            max="6.0"
-            step="0.1"
-            value={thicknessMm}
-            onChange={(e) => setThicknessMm(parseFloat(e.target.value))}
-            className="w-full accent-sky-600 dark:accent-[#0EB29A] bg-slate-200 dark:bg-[#101F23] h-2 rounded-lg cursor-pointer"
-          />
-
-          <div className="flex justify-between text-[10px] font-mono text-slate-500 dark:text-[#8C999A]">
-            <span>0.8 mm (FLEXIBLE)</span>
-            <span>STANDARD: 1.6 mm</span>
-            <span>6.0 mm (RIGID)</span>
-          </div>
-
-          <div className="p-2.5 bg-slate-50 dark:bg-[#101F23] rounded-[8px] border border-slate-200 dark:border-[#233A3D] flex items-center justify-between text-xs font-mono">
-            <span className="text-slate-600 dark:text-[#8C999A]">FLEXURAL RIGIDITY (D):</span>
-            <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">{flexuralRigidity} N·m</span>
-          </div>
-        </ChamferedCard>
-
-        {/* Proceed CTA */}
         <div className="pt-2">
           <HudButton
             variant="primary"
@@ -218,7 +208,7 @@ export default function MaterialSelectionPage() {
             onClick={handleConfirm}
             className="flex items-center justify-center gap-2"
           >
-            <span>CONFIRM MATERIAL → ENTER VIEWPORT</span>
+            <span>Continue to Live AR</span>
             <ArrowRight className="w-4 h-4" />
           </HudButton>
         </div>

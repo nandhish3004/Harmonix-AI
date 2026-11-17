@@ -265,6 +265,31 @@ EOF
       </div>
 
       <div className="p-4 space-y-4 flex-1 flex flex-col">
+        {/* Plain-English verdict hero */}
+        <div
+          className={`rounded-3xl p-5 text-white shadow-xl pop-in ${
+            !defectDetected && safetyScore >= 70
+              ? "bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 shadow-emerald-400/40"
+              : defectDetected
+              ? "bg-gradient-to-br from-rose-500 via-red-500 to-orange-500 shadow-rose-400/40"
+              : "bg-gradient-to-br from-amber-400 via-orange-500 to-pink-500 shadow-orange-400/40"
+          }`}
+        >
+          <div className="text-4xl mb-1">
+            {!defectDetected && safetyScore >= 70 ? "✅" : defectDetected ? "⚠️" : "🟠"}
+          </div>
+          <h2 className="text-xl font-extrabold leading-tight">
+            {!defectDetected && safetyScore >= 70
+              ? "Your board looks healthy & safe"
+              : defectDetected
+              ? "Possible hidden damage found"
+              : "Board is OK, but some parts need care"}
+          </h2>
+          <p className="text-sm text-white/90 mt-1 font-medium">
+            {material.name} · {thicknessMm} mm · rings at {measuredFreq} Hz · safety score {safetyScore}/100
+          </p>
+        </div>
+
         {/* Workpiece Summary Card */}
         <ChamferedCard className="p-4 space-y-3">
           <div className="flex items-center justify-between border-b border-slate-200 dark:border-[#294044]/60 pb-2">

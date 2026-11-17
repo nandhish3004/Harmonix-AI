@@ -123,17 +123,10 @@ export function useChladniShader(
         return;
       }
 
-      const isDark =
-        typeof document !== "undefined" &&
-        document.documentElement.classList.contains("dark");
-
-      if (isDark) {
-        ctx.fillStyle = "rgba(13, 25, 28, 0.3)";
-        ctx.fillRect(0, 0, width, height);
-      } else {
-        ctx.fillStyle = "rgba(241, 245, 249, 0.35)";
-        ctx.fillRect(0, 0, width, height);
-      }
+      // Meta-style dark glass plate: neon colors pop in both light & dark app themes
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = "rgba(8, 10, 32, 0.30)";
+      ctx.fillRect(0, 0, width, height);
 
       const m = modeMRef.current;
       const n = modeNRef.current;
@@ -143,9 +136,8 @@ export function useChladniShader(
         scatterBurstRef.current = Math.max(0, scatterBurstRef.current - 0.08);
       }
 
-      // Optional SDF nodal contour lines
+      // Rainbow nodal-line glow (SDF): hue follows position for a colorful aurora effect
       if (showSdfRef.current) {
-        ctx.fillStyle = isDark ? "rgba(14, 178, 154, 0.16)" : "rgba(2, 132, 199, 0.14)";
         const gridStep = 6;
         for (let sy = 0; sy < height; sy += gridStep) {
           const ny = sy / height;
@@ -153,21 +145,25 @@ export function useChladniShader(
             const nx = sx / width;
             const { w } = evalChladni(nx, ny, m, n);
             if (Math.abs(w) < 0.09) {
+              ctx.fillStyle = `hsla(${Math.round((nx + ny) * 180 + 170)}, 95%, 60%, 0.22)`;
               ctx.fillRect(sx, sy, gridStep, gridStep);
             }
           }
         }
       }
 
-      ctx.fillStyle = isDark ? "#DDF0C2" : "#1E293B";
-
       const drive = 0.0018 + Math.min(0.004, freq * 0.0000018);
+
+      // Bucket particles by displacement so each color is drawn with a single fill
+      const buckets: number[][] = [[], [], [], []];
+      const BUCKET_COLORS = ["#67E8F9", "#A78BFA", "#F472B6", "#FBBF24"];
 
       for (let i = 0; i < count; i += 2) {
         let px = particles[i * 4];
         let py = particles[i * 4 + 1];
         let vx = particles[i * 4 + 2];
         let vy = particles[i * 4 + 3];
+        let absW = 1;
 
         if (burst > 0.85) {
           px = (Math.random() - 0.5) * 2;
@@ -178,9 +174,10 @@ export function useChladniShader(
           const normX = (px + 1) * 0.5;
           const normY = (py + 1) * 0.5;
           const { w, gradX, gradY } = evalChladni(normX, normY, m, n);
+          absW = Math.abs(w);
 
           // Gradient force toward nodal lines (w = 0) + stochastic acoustic vibration where |w| is large
-          const jitter = Math.abs(w) * 0.012;
+          const jitter = absW * 0.012;
           const jx = (Math.random() - 0.5) * jitter;
           const jy = (Math.random() - 0.5) * jitter;
 
@@ -203,8 +200,23 @@ export function useChladniShader(
 
         const screenX = (px + 1) * 0.5 * width;
         const screenY = (py + 1) * 0.5 * height;
-        ctx.fillRect(screenX, screenY, 1.3, 1.3);
+        const b = absW < 0.12 ? 0 : absW < 0.5 ? 1 : absW < 1.0 ? 2 : 3;
+        buckets[b].push(screenX, screenY);
       }
+
+      ctx.globalCompositeOperation = "lighter";
+      for (let b = 0; b < 4; b++) {
+        const arr = buckets[b];
+        if (arr.length === 0) continue;
+        ctx.fillStyle = BUCKET_COLORS[b];
+        ctx.beginPath();
+        const size = b === 0 ? 1.8 : 1.4;
+        for (let k = 0; k < arr.length; k += 2) {
+          ctx.rect(arr[k], arr[k + 1], size, size);
+        }
+        ctx.fill();
+      }
+      ctx.globalCompositeOperation = "source-over";
 
       animRef.current = requestAnimationFrame(render);
     };

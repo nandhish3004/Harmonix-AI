@@ -280,49 +280,41 @@ export default function ComponentSafetyPage() {
     setStandoffs((prev) => [...prev, { id: `ai-pin-${Date.now()}`, x: bestX, y: bestY }]);
   };
 
+  // 🤖 AUTOMATION: on entry, if any part sits in a danger zone, AI places a support screw by itself
+  const [aiNote, setAiNote] = useState<string | null>(null);
+  const autoFixRef = useRef<() => void>(() => {});
+  autoFixRef.current = () => {
+    const anyRisk = components.some((c) => computeScore(c) < 70);
+    if (anyRisk && standoffs.length === 0) {
+      handleAutoOptimizeStandoff();
+      setAiNote("✨ AI spotted a risky part and added a support screw (S1) to protect it.");
+    } else if (!anyRisk) {
+      setAiNote("✅ All parts are already in safe spots. Nice!");
+    }
+  };
+  useEffect(() => {
+    const t = setTimeout(() => autoFixRef.current(), 1600);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#0D191C] flex flex-col select-none transition-colors duration-200">
+    <div className="min-h-screen flex flex-col select-none transition-colors duration-200">
       <HudHeader
-        title="SAFETY SCORING"
+        title="Part Safety"
         step="SCREEN 07 // 10"
-        subtitle={`Mode ${mode.indices} @ ${mode.freqHz} Hz`}
         backHref="/modes"
         rightAction={
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={handleAutoOptimizeStandoff}
-              className="px-2 h-8 flex items-center gap-1 rounded-[8px] border text-[10px] font-mono font-bold bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-[#1C332E] dark:text-[#4ADE80] dark:border-[#4ADE80]/50"
-              title="AI-place optimal standoff to protect all red components"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>AI FIX</span>
-            </button>
-            <button
-              onClick={() => setIsAddingStandoff((v) => !v)}
-              className={`px-2 h-8 flex items-center gap-1 rounded-[8px] border text-[10px] font-mono font-bold ${
-                isAddingStandoff
-                  ? "bg-sky-600 text-white border-sky-600 dark:bg-[#0EB29A] dark:text-[#0D191C]"
-                  : "bg-slate-100 dark:bg-[#15282C] border-slate-200 dark:border-[#294044] text-slate-700 dark:text-[#DDF0C2]"
-              }`}
-              title="Tap board to add a virtual standoff screw"
-            >
-              <PlusCircle className="w-3.5 h-3.5" />
-              <span>{isAddingStandoff ? "TAP BOARD" : "+ STANDOFF"}</span>
-            </button>
-            <button
-              onClick={() => {
-                setComponents(INITIAL_COMPONENTS);
-                setStandoffs([]);
-              }}
-              className="w-8 h-8 flex items-center justify-center rounded-[8px] bg-slate-100 dark:bg-[#15282C] border border-slate-200 dark:border-[#294044] text-slate-600 dark:text-[#8C999A]"
-              title="Reset Positions & Standoffs"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
-            <HudBadge variant={isSafe ? "safe" : "danger"} dot>
-              {isSafe ? "LOW RISK" : "ANTINODE"}
-            </HudBadge>
-          </div>
+          <button
+            onClick={() => {
+              setComponents(INITIAL_COMPONENTS);
+              setStandoffs([]);
+              setAiNote(null);
+            }}
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30 text-white"
+            title="Reset"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
         }
       />
 
@@ -338,11 +330,11 @@ export default function ComponentSafetyPage() {
               <AlertTriangle className="w-6 h-6 text-red-600 dark:text-[#FF4444]" />
             )}
             <div>
-              <span className="text-xs font-mono font-bold uppercase tracking-wider block">
-                {isSafe ? "SAFE // NODAL ZERO DISPLACEMENT" : "DANGER // HIGH DISPLACEMENT ANTINODE"}
+              <span className="text-sm font-extrabold block">
+                {isSafe ? "Safe spot — barely moves here" : "Danger — shakes a lot here"}
               </span>
-              <span className="text-[10px] font-mono opacity-80">
-                ACTIVE: {activeComp.name}
+              <span className="text-[11px] opacity-80">
+                Checking: {activeComp.name}
               </span>
             </div>
           </div>
@@ -426,6 +418,36 @@ export default function ComponentSafetyPage() {
           </div>
         </div>
 
+        {aiNote && (
+          <div className="pop-in px-3.5 py-2.5 rounded-2xl brand-gradient-soft border border-fuchsia-200 dark:border-[#DB2777]/40 text-[12px] font-semibold text-fuchsia-900 dark:text-[#F5FDFF]">
+            {aiNote}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-2">
+          <HudButton
+            variant="primary"
+            size="md"
+            onClick={() => {
+              handleAutoOptimizeStandoff();
+              setAiNote("✨ AI added another support screw where it helps most.");
+            }}
+            className="flex items-center justify-center gap-1.5"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>AI Fix</span>
+          </HudButton>
+          <HudButton
+            variant="secondary"
+            size="md"
+            onClick={() => setIsAddingStandoff((v) => !v)}
+            className="flex items-center justify-center gap-1.5"
+          >
+            <PlusCircle className="w-4 h-4" />
+            <span>{isAddingStandoff ? "Tap the board" : "Add screw"}</span>
+          </HudButton>
+        </div>
+
         {/* Component Selector Pills */}
         <div className="grid grid-cols-3 gap-2">
           {components.map((c) => {
@@ -455,19 +477,19 @@ export default function ComponentSafetyPage() {
         {/* Placement Telemetry Specs (Kirchhoff-Love + Basquin Fatigue) */}
         <ChamferedCard className="p-3.5 space-y-2">
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-slate-500 dark:text-[#8C999A]">RAYLEIGH STIFFENING SHIFT:</span>
+            <span className="text-slate-500 dark:text-[#8C999A]">Screws made board stiffer by:</span>
             <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">
-              {stiffenedEigenHz} Hz ({stiffeningDeltaHz > 0 ? `+${stiffeningDeltaHz} Hz` : "0 Hz"})
+              {stiffeningDeltaHz > 0 ? `+${stiffeningDeltaHz} Hz` : "0 Hz"}
             </span>
           </div>
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-slate-500 dark:text-[#8C999A]">MODAL RMS ACCELERATION:</span>
+            <span className="text-slate-500 dark:text-[#8C999A]">Shaking strength:</span>
             <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">
-              {activeMech.rmsAccelG.toFixed(2)} G RMS (σ = {activeMech.vonMisesMpa.toFixed(1)} MPa)
+              {activeMech.rmsAccelG.toFixed(2)} G · {activeMech.vonMisesMpa.toFixed(1)} MPa
             </span>
           </div>
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-slate-500 dark:text-[#8C999A]">BASQUIN FATIGUE LIFETIME (N_f):</span>
+            <span className="text-slate-500 dark:text-[#8C999A]">Life before cracking:</span>
             <span className={isSafe ? "text-emerald-700 dark:text-[#4ADE80] font-bold" : "text-red-700 dark:text-[#FF4444] font-bold"}>
               {activeMech.fatigueLifeCycles >= 1_000_000
                 ? "> 1,000,000 CYCLES"
@@ -484,7 +506,7 @@ export default function ComponentSafetyPage() {
             onClick={handleProceed}
             className="flex items-center justify-center gap-2"
           >
-            <span>VIEW VON MISES STRESS HEATMAP</span>
+            <span>Continue to Stress Map</span>
             <ArrowRight className="w-4 h-4" />
           </HudButton>
         </div>
