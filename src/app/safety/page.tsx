@@ -9,6 +9,7 @@ import {
   ArrowRight,
   RotateCcw,
   PlusCircle,
+  Sparkles,
 } from "lucide-react";
 import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
@@ -183,6 +184,47 @@ export default function ComponentSafetyPage() {
     setIsAddingStandoff(false);
   };
 
+  // Intelligent Standoff Optimizer: searches the 2D modal field to find the standoff
+  // location that maximizes the minimum safety score across all components.
+  const handleAutoOptimizeStandoff = () => {
+    let bestX = Math.round(boardSize.w * 0.5);
+    let bestY = Math.round(boardSize.h * 0.5);
+    let bestMinScore = -1;
+
+    for (let gx = 0.15; gx <= 0.85; gx += 0.07) {
+      for (let gy = 0.15; gy <= 0.85; gy += 0.07) {
+        const px = gx * boardSize.w;
+        const py = gy * boardSize.h;
+        let minCompScore = 100;
+
+        for (const comp of components) {
+          const nx = Math.max(0, Math.min(1, comp.x / boardSize.w));
+          const ny = Math.max(0, Math.min(1, comp.y / boardSize.h));
+          let amp = Math.abs(
+            mode.m === mode.n
+              ? Math.sin(mode.m * Math.PI * nx) * Math.sin(mode.n * Math.PI * ny) +
+                  0.35 * Math.cos(mode.m * Math.PI * nx) * Math.cos(mode.n * Math.PI * ny)
+              : chladniAmplitude(nx, ny, mode.m, mode.n)
+          );
+          for (const pin of [...standoffs, { id: "cand", x: px, y: py }]) {
+            const d2 = (nx - pin.x / boardSize.w) ** 2 + (ny - pin.y / boardSize.h) ** 2;
+            amp *= 1 - Math.exp(-d2 / 0.018);
+          }
+          const score = Math.max(8, Math.min(99, Math.round(100 - amp * 68)));
+          if (score < minCompScore) minCompScore = score;
+        }
+
+        if (minCompScore > bestMinScore) {
+          bestMinScore = minCompScore;
+          bestX = Math.round(px);
+          bestY = Math.round(py);
+        }
+      }
+    }
+
+    setStandoffs((prev) => [...prev, { id: `ai-pin-${Date.now()}`, x: bestX, y: bestY }]);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#0D191C] flex flex-col select-none transition-colors duration-200">
       <HudHeader
@@ -192,6 +234,14 @@ export default function ComponentSafetyPage() {
         backHref="/modes"
         rightAction={
           <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleAutoOptimizeStandoff}
+              className="px-2 h-8 flex items-center gap-1 rounded-[8px] border text-[10px] font-mono font-bold bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-[#1C332E] dark:text-[#4ADE80] dark:border-[#4ADE80]/50"
+              title="AI-place optimal standoff to protect all red components"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>AI FIX</span>
+            </button>
             <button
               onClick={() => setIsAddingStandoff((v) => !v)}
               className={`px-2 h-8 flex items-center gap-1 rounded-[8px] border text-[10px] font-mono font-bold ${
