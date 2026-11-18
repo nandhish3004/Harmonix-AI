@@ -57,11 +57,11 @@ export const HudNav: React.FC = () => {
               className={clsx(
                 "flex flex-col items-center justify-center shrink-0 min-w-[62px] py-1.5 px-2 rounded-2xl transition-all duration-150 select-none",
                 isActive
-                  ? "brand-gradient text-white shadow-md shadow-fuchsia-400/40 scale-105"
+                  ? "bg-sky-50 text-sky-700 border border-sky-300 shadow-sm scale-105 dark:bg-[#1C332E] dark:text-[#0EB29A] dark:border-[#0EB29A]/40"
                   : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-[#8C999A] dark:hover:text-[#F5FDFF] dark:hover:bg-[#15282C]"
               )}
             >
-              <Icon className={clsx("w-4 h-4 mb-0.5", isActive ? "text-white" : "text-slate-400")} />
+              <Icon className={clsx("w-4 h-4 mb-0.5", isActive ? "text-sky-600 dark:text-[#0EB29A]" : "text-slate-400")} />
               <span className="text-[10px] font-semibold whitespace-nowrap leading-none">
                 {idx + 1}. {step.label}
               </span>

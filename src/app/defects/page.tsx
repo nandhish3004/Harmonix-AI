@@ -7,11 +7,14 @@ import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
+import { TestGuide } from "@/components/guide/TestGuide";
+import { useAutoAdvance } from "@/context/autopilot";
 import { getStoredActiveMode, getStoredPlateGeometry } from "@/utils/physics";
 
 export default function DefectAnalysisPage() {
   const router = useRouter();
 
+  const [guideOpen, setGuideOpen] = useState<boolean>(true);
   const [baselineHz, setBaselineHz] = useState<number>(740);
   const [actualHz, setActualHz] = useState<number>(702);
   const [plateAreaMm2, setPlateAreaMm2] = useState<number>(14250);
@@ -49,6 +52,8 @@ export default function DefectAnalysisPage() {
     router.push("/export");
   };
 
+  useAutoAdvance(!guideOpen, 3000, () => handleProceed());
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#0D191C] flex flex-col transition-colors duration-200">
       <HudHeader
@@ -64,6 +69,7 @@ export default function DefectAnalysisPage() {
       />
 
       <div className="p-4 space-y-4 flex-1 flex flex-col">
+        <TestGuide kind="health" open={guideOpen} onDone={() => setGuideOpen(false)} />
         {/* Main Defect Callout Banner */}
         <ChamferedCard
           variant={defectDetected ? "danger" : "safe"}

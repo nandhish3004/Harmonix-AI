@@ -19,7 +19,10 @@ import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
-import { checkAiHealth, AiBackendHealth } from "@/utils/aiClient";
+import { checkAiHealth, AiHealth } from "@/utils/aiClient";
+import { TestGuide } from "@/components/guide/TestGuide";
+import { useAutoAdvance, useAutopilot } from "@/context/autopilot";
+import { speak } from "@/utils/voice";
 
 export default function SetupCalibrationPage() {
   const router = useRouter();
@@ -32,7 +35,12 @@ export default function SetupCalibrationPage() {
   const [sweepHz, setSweepHz] = useState<number>(440);
   const [isTonePlaying, setIsTonePlaying] = useState<boolean>(false);
   const [isCalibrating, setIsCalibrating] = useState<boolean>(true);
-  const [aiHealth, setAiHealth] = useState<AiBackendHealth>({ status: "offline" });
+  const [aiHealth, setAiHealth] = useState<AiHealth>({ status: "offline", hfConfigured: false });
+  const [guideOpen, setGuideOpen] = useState<boolean>(true);
+  const { enabled: autopilotOn, start: startAutopilot } = useAutopilot();
+
+  // 🤖 Autopilot: once sensors are checked, go to the scanner automatically
+  useAutoAdvance(!isCalibrating && !guideOpen, 2500);
 
   const micStreamRef = useRef<MediaStream | null>(null);
   const camStreamRef = useRef<MediaStream | null>(null);
@@ -373,7 +381,7 @@ export default function SetupCalibrationPage() {
         <div className="p-3 bg-slate-100/90 dark:bg-[#101F23]/80 rounded-[12px] border border-slate-200 dark:border-[#233A3D] space-y-2">
           <div className="flex items-center justify-between text-xs font-mono">
             <span className="text-slate-700 dark:text-[#DDF0C2] font-semibold">
-              PYTORCH + HUGGING FACE AI
+              HUGGING FACE AI
             </span>
             <span
               className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -382,13 +390,11 @@ export default function SetupCalibrationPage() {
                   : "bg-sky-100 text-sky-700 dark:bg-[#15282C] dark:text-[#0EB29A]"
               }`}
             >
-              {aiHealth.status === "online"
-                ? `ONLINE (${aiHealth.device?.toUpperCase() || "CPU"})`
-                : "BROWSER ENGINE ACTIVE"}
+              {aiHealth.status === "online" ? "CLOUD MODELS CONNECTED" : "ON-DEVICE AI ACTIVE"}
             </span>
           </div>
           <div className="text-[10px] font-mono text-slate-500 dark:text-[#8C999A]">
-            Models: DINOv2-Small (Vision) • MIT AST (Audio NDT) • PyTorch PINN
+            Vision: OWL-ViT zero-shot detector • Audio: Audio Spectrogram Transformer • Fallback: on-device FFT + CV
           </div>
           <div className="flex items-center gap-2 text-xs font-mono text-slate-700 dark:text-[#DDF0C2] pt-1">
             <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-[#4ADE80]" />
@@ -398,6 +404,33 @@ export default function SetupCalibrationPage() {
             <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-[#4ADE80]" />
             <span>AUTOCORRELATION + FFT TAP-TEST: READY</span>
           </div>
+        </div>
+
+        <TestGuide kind="setup" open={guideOpen} onDone={() => setGuideOpen(false)} />
+
+        {/* 🤖 Hands-free autopilot */}
+        <div className="rounded-3xl p-4 bg-slate-900 dark:bg-[#15282C] text-white border border-slate-700 dark:border-[#294044] space-y-2.5">
+          <div className="flex items-center gap-2 font-extrabold">
+            <span className="text-xl">🤖</span>
+            <span>AI Autopilot</span>
+          </div>
+          <p className="text-xs text-slate-300 dark:text-[#8C999A] leading-snug">
+            Let AI run the whole inspection for you: it scans, picks the material, finds resonance, listens to your taps,
+            protects risky parts and builds the report — with voice guidance if you want it.
+          </p>
+          <HudButton
+            variant="secondary"
+            size="lg"
+            fullWidth
+            onClick={() => {
+              startAutopilot();
+              void speak("Autopilot on. I will guide you through every step.");
+              router.push("/scan");
+            }}
+            className="flex items-center justify-center gap-2"
+          >
+            <span>{autopilotOn ? "Autopilot is ON — restart" : "Start AI Autopilot"}</span>
+          </HudButton>
         </div>
 
         {/* Proceed CTA */}

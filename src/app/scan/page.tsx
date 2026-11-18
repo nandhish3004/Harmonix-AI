@@ -19,7 +19,10 @@ import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
 import { useBoundaryDetection } from "@/hooks/useBoundaryDetection";
-import { segmentPlateWithDinoV2 } from "@/utils/aiClient";
+import { detectBoardHF } from "@/utils/aiClient";
+import { TestGuide } from "@/components/guide/TestGuide";
+import { useAutoAdvance } from "@/context/autopilot";
+import { speak } from "@/utils/voice";
 
 export default function WorkpieceScanPage() {
   const router = useRouter();
@@ -53,6 +56,61 @@ export default function WorkpieceScanPage() {
   const [showEdgeOverlay, setShowEdgeOverlay] = useState<boolean>(true);
   const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [isAiRunning, setIsAiRunning] = useState<boolean>(false);
+  const [guideOpen, setGuideOpen] = useState<boolean>(true);
+  const [aiEngine, setAiEngine] = useState<string>("On-device CV");
+  const autoDetectedRef = useRef<boolean>(false);
+  const previewImgRef = useRef<HTMLImageElement | null>(null);
+
+  /** Save a small crop of the scanned board so the next screen can guess the material from its colour. */
+  const saveThumbnail = (cw: number, ch: number) => {
+    try {
+      const c = document.createElement("canvas");
+      c.width = 96;
+      c.height = 96;
+      const ctx = c.getContext("2d");
+      if (!ctx) return;
+      const xs = polygonCoords.map((p) => p.x);
+      const ys = polygonCoords.map((p) => p.y);
+      const bx = Math.max(0, Math.min(...xs));
+      const by = Math.max(0, Math.min(...ys));
+      const bw = Math.max(20, Math.min(cw, Math.max(...xs)) - bx);
+      const bh = Math.max(20, Math.min(ch, Math.max(...ys)) - by);
+
+      let src: CanvasImageSource | null = null;
+      let sw = 0;
+      let sh = 0;
+      if (uploadedImageUrl && previewImgRef.current && previewImgRef.current.naturalWidth > 0) {
+        src = previewImgRef.current;
+        sw = previewImgRef.current.naturalWidth;
+        sh = previewImgRef.current.naturalHeight;
+      } else if (videoRef.current && videoRef.current.readyState >= 2) {
+        src = videoRef.current;
+        sw = videoRef.current.videoWidth;
+        sh = videoRef.current.videoHeight;
+      }
+      if (!src || sw === 0 || sh === 0) return;
+
+      // map container (object-cover) coordinates back to source pixels
+      const srcRatio = sw / sh;
+      const dstRatio = cw / ch;
+      let cropX = 0;
+      let cropY = 0;
+      let cropW = sw;
+      let cropH = sh;
+      if (srcRatio > dstRatio) {
+        cropW = sh * dstRatio;
+        cropX = (sw - cropW) / 2;
+      } else {
+        cropH = sw / dstRatio;
+        cropY = (sh - cropH) / 2;
+      }
+      const k = cropW / cw;
+      ctx.drawImage(src, cropX + bx * k, cropY + by * k, bw * k, bh * k, 0, 0, 96, 96);
+      localStorage.setItem("harmonix_scan_thumb", c.toDataURL("image/jpeg", 0.8));
+    } catch {
+      // thumbnail is optional
+    }
+  };
 
   useEffect(() => {
     if (videoRef.current) {
@@ -64,14 +122,29 @@ export default function WorkpieceScanPage() {
   const userTouchedRef = useRef<boolean>(false);
   useEffect(() => {
     const t = setTimeout(() => {
-      if (!userTouchedRef.current && !cameraActive && !uploadedImageUrl) {
+      if (!guideOpen && !userTouchedRef.current && !cameraActive && !uploadedImageUrl) {
         handleLoadSamplePcb();
         setScanMessage("No camera found — I loaded a sample board so you can try the app.");
       }
     }, 4000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cameraActive, uploadedImageUrl]);
+  }, [cameraActive, uploadedImageUrl, guideOpen]);
+
+  // 🤖 AUTOMATION 0: once the guide is closed and the camera/photo is ready, AI detects the board by itself
+  useEffect(() => {
+    if (guideOpen || !(cameraActive || uploadedImageUrl)) return;
+    const t = setTimeout(() => {
+      if (autoDetectedRef.current) return;
+      autoDetectedRef.current = true;
+      void handleAutoSegment();
+    }, 1600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guideOpen, cameraActive, uploadedImageUrl]);
+
+  // 🤖 Autopilot: once locked, continue to the next screen automatically
+  useAutoAdvance(isLocked && !guideOpen, 2200, () => handleConfirmAndProceed());
 
   // 🤖 AUTOMATION 2b: for photos/sample boards, lock automatically once confidence is good
   useEffect(() => {
@@ -106,6 +179,7 @@ export default function WorkpieceScanPage() {
       lockBoundary();
       stableCountRef.current = 0;
       setScanMessage("✅ AI locked onto your board automatically. Tap Continue!");
+      void speak("Board locked.", { interrupt: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [polygonCoords, edgeConfidence, isLocked, activePinIndex]);
@@ -132,34 +206,82 @@ export default function WorkpieceScanPage() {
     if (isLocked) unlockBoundary();
     setIsAiRunning(true);
     try {
-      // Try Hugging Face DINOv2 backend first if video/image frame is available
+      // 1️⃣ Hugging Face OWL-ViT zero-shot detection (server-side). The snapshot uses the same
+      //    object-cover crop the user sees, so detected boxes line up exactly with the screen.
       if (containerRef.current && (cameraActive || uploadedImageUrl)) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const cw = Math.round(rect.width) || 360;
+        const ch = Math.round(rect.height) || 380;
+        const S = 2;
         const snap = document.createElement("canvas");
-        snap.width = 360;
-        snap.height = 380;
+        snap.width = cw * S;
+        snap.height = ch * S;
         const sCtx = snap.getContext("2d");
         if (sCtx) {
+          let src: CanvasImageSource | null = null;
+          let sw = 0;
+          let sh = 0;
           if (uploadedImageUrl) {
             const imgEl = new Image();
             imgEl.src = uploadedImageUrl;
-            await new Promise((r) => { imgEl.onload = r; });
-            sCtx.drawImage(imgEl, 0, 0, 360, 380);
+            await new Promise<void>((r) => {
+              imgEl.onload = () => r();
+              imgEl.onerror = () => r();
+            });
+            src = imgEl;
+            sw = imgEl.naturalWidth;
+            sh = imgEl.naturalHeight;
           } else if (videoRef.current && videoRef.current.readyState >= 2) {
-            sCtx.drawImage(videoRef.current, 0, 0, 360, 380);
+            src = videoRef.current;
+            sw = videoRef.current.videoWidth;
+            sh = videoRef.current.videoHeight;
           }
-          const blob = await new Promise<Blob | null>((r) => snap.toBlob(r, "image/png"));
-          if (blob) {
-            const rect = containerRef.current.getBoundingClientRect();
-            const aiRes = await segmentPlateWithDinoV2(blob, Math.round(rect.width), Math.round(rect.height));
-            if (aiRes && aiRes.corners.length === 4) {
-              aiRes.corners.forEach((c, idx) => updateCornerPoint(idx, c.x, c.y));
-              setScanMessage(`HuggingFace ${aiRes.model} segmented workpiece (${aiRes.confidence}% conf).`);
-              setTimeout(() => setScanMessage(null), 3500);
-              return;
+          if (src && sw > 0 && sh > 0) {
+            const srcRatio = sw / sh;
+            const dstRatio = cw / ch;
+            let sx = 0;
+            let sy = 0;
+            let cropW = sw;
+            let cropH = sh;
+            if (srcRatio > dstRatio) {
+              cropW = sh * dstRatio;
+              sx = (sw - cropW) / 2;
+            } else {
+              cropH = sw / dstRatio;
+              sy = (sh - cropH) / 2;
+            }
+            sCtx.drawImage(src, sx, sy, cropW, cropH, 0, 0, cw * S, ch * S);
+            const blob = await new Promise<Blob | null>((r) => snap.toBlob(r, "image/jpeg", 0.85));
+            if (blob) {
+              const det = await detectBoardHF(blob);
+              if (det) {
+                const x0 = Math.max(8, Math.round(det.box.xmin / S));
+                const y0 = Math.max(8, Math.round(det.box.ymin / S));
+                const x1 = Math.min(cw - 8, Math.round(det.box.xmax / S));
+                const y1 = Math.min(ch - 8, Math.round(det.box.ymax / S));
+                if (x1 - x0 > 40 && y1 - y0 > 40) {
+                  updateCornerPoint(0, x0, y0);
+                  updateCornerPoint(1, x1, y0);
+                  updateCornerPoint(2, x1, y1);
+                  updateCornerPoint(3, x0, y1);
+                  setAiEngine(`Hugging Face · ${det.model.split("/").pop()}`);
+                  if (typeof window !== "undefined" && det.materialId) {
+                    localStorage.setItem("harmonix_hf_material", det.materialId);
+                    localStorage.setItem("harmonix_hf_material_label", det.label);
+                  }
+                  setScanMessage(
+                    `🤗 Hugging Face found "${det.label}" (${Math.round(det.score * 100)}% sure) and outlined it.`
+                  );
+                  void speak("I found your board.", { interrupt: false });
+                  setTimeout(() => setScanMessage(null), 4000);
+                  return;
+                }
+              }
             }
           }
         }
       }
+      setAiEngine("On-device CV");
 
       // Instant Browser Sobel CV fallback
       const found = detectOnce();
@@ -253,6 +375,16 @@ export default function WorkpieceScanPage() {
       localStorage.setItem("harmonix_boundary", JSON.stringify(polygonCoords));
       localStorage.setItem("harmonix_plate_area", String(areaMm2));
       localStorage.setItem("harmonix_aspect_ratio", String(aspectRatio));
+      const cRect = containerRef.current?.getBoundingClientRect();
+      if (cRect && cRect.width > 0 && cRect.height > 0) {
+        // Normalised outline + frame aspect so the AR view can overlay it exactly where it was scanned
+        localStorage.setItem("harmonix_scan_aspect", String(cRect.width / cRect.height));
+        localStorage.setItem(
+          "harmonix_boundary_norm",
+          JSON.stringify(polygonCoords.map((p) => ({ x: p.x / cRect.width, y: p.y / cRect.height })))
+        );
+        saveThumbnail(cRect.width, cRect.height);
+      }
     }
     router.push("/material");
   };
@@ -312,6 +444,7 @@ export default function WorkpieceScanPage() {
             <img
               src={uploadedImageUrl}
               alt="Workpiece target"
+              ref={previewImgRef}
               className="absolute inset-0 w-full h-full object-cover opacity-90"
             />
           )}
@@ -405,6 +538,11 @@ export default function WorkpieceScanPage() {
           )}
         </div>
 
+        <TestGuide kind="scan" open={guideOpen} onDone={() => setGuideOpen(false)} />
+        <div className="text-[11px] font-semibold text-slate-500 dark:text-[#8C999A] flex items-center gap-1.5 px-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-sky-500 dark:bg-[#0EB29A]" />
+          AI engine: {aiEngine}
+        </div>
         {scanMessage && (
           <div className="px-3 py-2 rounded-[8px] bg-sky-50 dark:bg-[#15282C] border border-sky-200 dark:border-[#0EB29A]/50 text-[11px] font-mono text-sky-800 dark:text-[#DDF0C2]">
             {scanMessage}

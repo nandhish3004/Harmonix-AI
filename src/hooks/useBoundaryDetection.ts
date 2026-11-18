@@ -70,7 +70,7 @@ function computeQuadMetrics(pts: Point2D[]): { aspectRatio: number; areaMm2: num
  * Grayscale -> 3x3 Box/Gaussian Blur -> Sobel Edge Gradient -> Adaptive Threshold
  * -> Extremal Quadrilateral Corner Detection (P1..P4) + Optional Edge Overlay
  */
-function detectQuadFromSource(
+export function detectQuadFromSource(
   source: HTMLVideoElement | HTMLImageElement,
   srcWidth: number,
   srcHeight: number,

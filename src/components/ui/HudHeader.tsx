@@ -4,6 +4,7 @@ import React from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { VoiceToggle } from "@/components/ui/VoiceToggle";
 
 interface HudHeaderProps {
   title: string;
@@ -18,11 +19,11 @@ interface HudHeaderProps {
 const FRIENDLY: Record<number, { emoji: string; title: string; tip: string }> = {
   1: { emoji: "🔧", title: "Get Ready", tip: "Allow camera & mic. We check everything for you." },
   2: { emoji: "📸", title: "Scan Your Board", tip: "Point at your board — AI finds the edges by itself." },
-  3: { emoji: "🧱", title: "Pick Material", tip: "Tap what your board is made of. AI recommends one." },
+  3: { emoji: "🧱", title: "Pick Material", tip: "AI guesses the material from your scan. Confirm or change." },
   4: { emoji: "🕶️", title: "Live AR View", tip: "See invisible vibrations on your real board." },
-  5: { emoji: "🎵", title: "Find Its Note", tip: "Tap the board once. AI hears its natural pitch." },
+  5: { emoji: "🎵", title: "Find Its Note", tip: "Tap the board. AI listens and finds its natural pitch." },
   6: { emoji: "🌈", title: "Vibration Shapes", tip: "AI picked the best pattern for your board." },
-  7: { emoji: "🛡️", title: "Part Safety", tip: "Green = safe, Red = may crack. Tap AI Fix!" },
+  7: { emoji: "🛡️", title: "Part Safety", tip: "Green = safe, Red = may crack. AI protects parts for you." },
   8: { emoji: "🔥", title: "Stress Map", tip: "Hot colors show where the board may break." },
   9: { emoji: "🩺", title: "Health Check", tip: "Compare against a healthy board for hidden damage." },
   10: { emoji: "📄", title: "Your Report", tip: "Download or share your results." },
@@ -49,66 +50,60 @@ export const HudHeader: React.FC<HudHeaderProps> = ({
   const friendly = stepNum ? FRIENDLY[stepNum] : null;
 
   const handleBack = () => {
-    if (onBack) {
-      onBack();
-    } else if (backHref) {
-      router.push(backHref);
-    } else {
-      router.back();
-    }
+    if (onBack) onBack();
+    else if (backHref) router.push(backHref);
+    else router.back();
   };
 
   const shownTitle = friendly ? friendly.title : title;
   const shownTip = friendly ? friendly.tip : subtitle;
 
   return (
-    <header className="w-full sticky top-0 z-50 transition-colors duration-200">
-      {/* Vibrant brand bar */}
-      <div className="brand-gradient px-4 pt-3 pb-3 text-white shadow-lg">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
-            {(backHref || onBack) && (
-              <button
-                onClick={handleBack}
-                aria-label="Back"
-                className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
+    <header className="w-full sticky top-0 z-50 bg-white/95 dark:bg-[#0D191C]/95 backdrop-blur-md border-b border-slate-200 dark:border-[#294044] px-4 pt-3 pb-3 transition-colors duration-200">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          {(backHref || onBack) && (
+            <button
+              onClick={handleBack}
+              aria-label="Back"
+              className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-slate-100 dark:bg-[#15282C] border border-slate-200 dark:border-[#294044] text-slate-600 dark:text-[#8C999A] hover:text-slate-900 dark:hover:text-[#F5FDFF] hover:border-slate-300 dark:hover:border-[#0EB29A] transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          )}
+
+          <div className="min-w-0">
+            {stepNum && (
+              <span className="block text-[10px] tracking-wide text-sky-600 dark:text-[#0EB29A] font-semibold">
+                Step {stepNum} of 10
+              </span>
             )}
-
-            <div className="min-w-0">
-              {stepNum && (
-                <span className="block text-[10px] tracking-wide text-white/80 font-semibold">
-                  Step {stepNum} of 10
-                </span>
-              )}
-              <h1 className="text-lg font-extrabold leading-tight flex items-center gap-1.5 truncate">
-                {friendly && <span className="text-xl">{friendly.emoji}</span>}
-                <span className="truncate">{shownTitle}</span>
-              </h1>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <ThemeToggle />
-            {rightAction}
+            <h1 className="text-lg font-extrabold leading-tight text-slate-900 dark:text-[#F5FDFF] flex items-center gap-1.5 truncate">
+              {friendly && <span className="text-xl">{friendly.emoji}</span>}
+              <span className="truncate">{shownTitle}</span>
+            </h1>
           </div>
         </div>
 
-        {shownTip && (
-          <p className="mt-1.5 text-[12px] text-white/90 font-medium leading-snug">{shownTip}</p>
-        )}
-
-        {stepNum && (
-          <div className="mt-2.5 h-1.5 w-full rounded-full bg-white/25 overflow-hidden">
-            <div
-              className="h-full rounded-full bg-white transition-all duration-500"
-              style={{ width: `${(stepNum / 10) * 100}%` }}
-            />
-          </div>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          <VoiceToggle />
+          <ThemeToggle />
+          {rightAction}
+        </div>
       </div>
+
+      {shownTip && (
+        <p className="mt-1.5 text-[12px] text-slate-500 dark:text-[#8C999A] font-medium leading-snug">{shownTip}</p>
+      )}
+
+      {stepNum && (
+        <div className="mt-2.5 h-1.5 w-full rounded-full bg-slate-200 dark:bg-[#233A3D] overflow-hidden">
+          <div
+            className="h-full rounded-full bg-sky-600 dark:bg-[#0EB29A] transition-all duration-500"
+            style={{ width: `${(stepNum / 10) * 100}%` }}
+          />
+        </div>
+      )}
     </header>
   );
 };

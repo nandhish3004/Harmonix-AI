@@ -3,6 +3,7 @@ import { JetBrains_Mono, Inter } from "next/font/google";
 import "./globals.css";
 import { HudNav } from "@/components/ui/HudNav";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AutopilotProvider } from "@/context/autopilot";
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
@@ -30,9 +31,11 @@ export default function RootLayout({
         className={`${jetbrainsMono.variable} ${inter.variable} min-h-screen bg-slate-50 dark:bg-[#0D191C] text-slate-900 dark:text-[#F5FDFF] flex justify-center transition-colors duration-200`}
       >
         <ThemeProvider defaultTheme="light" attribute="class" enableSystem={false}>
-          <div className="w-full max-w-[440px] min-h-screen bg-gradient-to-b from-fuchsia-50/60 via-white to-orange-50/50 dark:from-[#0D191C] dark:via-[#0D191C] dark:to-[#0D191C] border-x border-slate-200 dark:border-[#294044]/50 flex flex-col relative shadow-xl">
-            <main className="flex-1 pb-20">{children}</main>
-            <HudNav />
+          <div className="w-full max-w-[440px] min-h-screen bg-white dark:bg-[#0D191C] border-x border-slate-200 dark:border-[#294044]/50 flex flex-col relative shadow-xl">
+            <AutopilotProvider>
+              <main className="flex-1 pb-20">{children}</main>
+              <HudNav />
+            </AutopilotProvider>
           </div>
         </ThemeProvider>
       </body>

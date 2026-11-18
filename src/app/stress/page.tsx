@@ -7,6 +7,7 @@ import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
+import { useAutoAdvance } from "@/context/autopilot";
 import {
   computePlateDimensionsMeters,
   evalPlateMechanics,
@@ -33,6 +34,8 @@ export default function StressHeatmapPage() {
   const sfNum = yieldStrengthMpa / Math.max(0.1, peakStressMpa);
   const safetyFactor = sfNum >= 100 ? ">99" : sfNum.toFixed(2);
   const isSafe = sfNum >= 1.5;
+
+  useAutoAdvance(true, 2800, () => router.push("/defects"));
 
   useEffect(() => {
     const mode = getStoredActiveMode();

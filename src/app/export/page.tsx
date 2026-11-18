@@ -12,7 +12,9 @@ import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
+import { useAutopilot } from "@/context/autopilot";
 import { createClient } from "@/utils/supabase/client";
+import { speak } from "@/utils/voice";
 import {
   getStoredActiveMode,
   getStoredMaterial,
@@ -28,6 +30,7 @@ interface Point2D {
 
 export default function ExportReportPage() {
   const router = useRouter();
+  const autopilot = useAutopilot();
   const [isExportingDxf, setIsExportingDxf] = useState<boolean>(false);
   const [isSyncingSupabase, setIsSyncingSupabase] = useState<boolean>(false);
   const [syncStatus, setSyncStatus] = useState<"idle" | "synced" | "error">("idle");
@@ -73,6 +76,14 @@ export default function ExportReportPage() {
       if (def !== null) setDefectDetected(def === "true");
     }
   }, []);
+
+  useEffect(() => {
+    if (autopilot.enabled) {
+      void speak("Your inspection report is ready.");
+      autopilot.stop();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autopilot.enabled]);
 
   // Generate real DXF file content from actual scanned boundary
   const handleExportDxf = () => {
@@ -269,10 +280,10 @@ EOF
         <div
           className={`rounded-3xl p-5 text-white shadow-xl pop-in ${
             !defectDetected && safetyScore >= 70
-              ? "bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 shadow-emerald-400/40"
+              ? "bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-400/30"
               : defectDetected
-              ? "bg-gradient-to-br from-rose-500 via-red-500 to-orange-500 shadow-rose-400/40"
-              : "bg-gradient-to-br from-amber-400 via-orange-500 to-pink-500 shadow-orange-400/40"
+              ? "bg-gradient-to-br from-red-600 to-rose-700 shadow-red-400/30"
+              : "bg-gradient-to-br from-amber-500 to-amber-600 shadow-amber-400/30"
           }`}
         >
           <div className="text-4xl mb-1">

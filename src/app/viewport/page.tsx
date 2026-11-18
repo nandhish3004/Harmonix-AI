@@ -17,7 +17,11 @@ import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
+import { TestGuide } from "@/components/guide/TestGuide";
+import { useAutoAdvance } from "@/context/autopilot";
+import { detectQuadFromSource } from "@/hooks/useBoundaryDetection";
 import { useChladniShader } from "@/hooks/useChladniShader";
+import { speak } from "@/utils/voice";
 import {
   chladniAmplitude,
   computeAllModes,
@@ -62,6 +66,8 @@ export default function ChladniViewportPage() {
   const [cameraActive, setCameraActive] = useState<boolean>(false);
   const [isAudioOn, setIsAudioOn] = useState<boolean>(false);
   const [isFinding, setIsFinding] = useState<boolean>(false);
+  const [guideOpen, setGuideOpen] = useState<boolean>(true);
+  const [sweepDone, setSweepDone] = useState<boolean>(false);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
   const [showFineTune, setShowFineTune] = useState<boolean>(false);
   const [material, setMaterial] = useState<MaterialData>(DEFAULT_MATERIAL);
@@ -96,16 +102,29 @@ export default function ChladniViewportPage() {
       const savedFreq = Number(localStorage.getItem("harmonix_peak_freq"));
       if (Number.isFinite(savedFreq) && savedFreq >= 200) setFrequency(savedFreq);
       try {
-        const b = localStorage.getItem("harmonix_boundary");
-        if (b) {
-          const parsed = JSON.parse(b);
-          if (Array.isArray(parsed) && parsed.length === 4) {
+        const bNorm = localStorage.getItem("harmonix_boundary_norm");
+        if (bNorm) {
+          const parsedNorm = JSON.parse(bNorm);
+          if (Array.isArray(parsedNorm) && parsedNorm.length === 4) {
             setQuad(
-              parsed.map((p: Point2D) => ({
-                x: Math.max(20, Math.min(340, p.x)),
-                y: Math.max(20, Math.min(340, (p.y / 380) * 360)),
+              parsedNorm.map((p: Point2D) => ({
+                x: Math.max(15, Math.min(345, p.x * 360)),
+                y: Math.max(15, Math.min(345, p.y * 360)),
               }))
             );
+          }
+        } else {
+          const b = localStorage.getItem("harmonix_boundary");
+          if (b) {
+            const parsed = JSON.parse(b);
+            if (Array.isArray(parsed) && parsed.length === 4) {
+              setQuad(
+                parsed.map((p: Point2D) => ({
+                  x: Math.max(20, Math.min(340, p.x)),
+                  y: Math.max(20, Math.min(340, (p.y / 380) * 360)),
+                }))
+              );
+            }
           }
         }
       } catch {
@@ -145,21 +164,26 @@ export default function ChladniViewportPage() {
         clearInterval(timer);
         setFrequency(Math.round(end));
         setIsFinding(false);
+        setSweepDone(true);
         setAiMessage(
           `✅ Locked! Your board resonates at ${Math.round(end)} Hz — watch the colors light up.`
         );
+        void speak(`Resonance locked at ${Math.round(end)} hertz.`, { interrupt: false });
         setTimeout(() => setAiMessage(null), 5000);
       }
     }, 55);
   }, [isFinding, material, thicknessMm, plateGeo]);
 
-  // Auto-run once on entry so users see magic without touching anything
+  // Auto-run once guide closes so users see magic without touching anything
   useEffect(() => {
-    if (!loaded || autoRanRef.current) return;
+    if (!loaded || guideOpen || autoRanRef.current) return;
     autoRanRef.current = true;
-    const t = setTimeout(() => findResonance(), 700);
+    const t = setTimeout(() => findResonance(), 600);
     return () => clearTimeout(t);
-  }, [loaded, findResonance]);
+  }, [loaded, guideOpen, findResonance]);
+
+  // 🤖 Autopilot: move to Pitch Tuner after sweep completes
+  useAutoAdvance(sweepDone && !guideOpen && !isFinding, 2800, () => router.push("/tuner"));
 
   // Live camera pass-through for AR
   useEffect(() => {
@@ -244,11 +268,13 @@ export default function ChladniViewportPage() {
 
     let raf = 0;
     let phase = 0;
+    let frameTick = 0;
     const cols = viewMode === "ar" ? 20 : 26;
     const rows = cols;
     const evalAmp = (nx: number, ny: number) =>
       chladniAmplitude(nx, ny, activeMode.m, activeMode.n);
-    const H = computeHomography(quad);
+    let trackedQuad: Point2D[] = quad.map((p) => ({ ...p }));
+    const workCanvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
     const gainScale = Math.min(2.2, 0.55 + activeMode.resonanceGain * 0.14);
     const sparkles = Array.from({ length: 26 }, () => ({
       u: Math.random(),
@@ -261,20 +287,50 @@ export default function ChladniViewportPage() {
 
     const draw = () => {
       phase += 0.12;
+      frameTick++;
+
+      // Live camera CV quad tracking every 6 frames with EMA smoothing
+      if (
+        frameTick % 6 === 0 &&
+        viewMode === "ar" &&
+        cameraActive &&
+        videoRef.current &&
+        videoRef.current.readyState >= 2 &&
+        workCanvas
+      ) {
+        const res = detectQuadFromSource(
+          videoRef.current,
+          videoRef.current.videoWidth,
+          videoRef.current.videoHeight,
+          360,
+          360,
+          null,
+          workCanvas
+        );
+        if (res.corners && res.corners.length === 4 && res.confidence >= 45) {
+          trackedQuad = trackedQuad.map((p, idx) => ({
+            x: p.x * 0.82 + res.corners![idx].x * 0.18,
+            y: p.y * 0.82 + res.corners![idx].y * 0.18,
+          }));
+        }
+      }
+
+      const H = computeHomography(trackedQuad);
+
       ctx.globalCompositeOperation = "source-over";
       ctx.clearRect(0, 0, 360, 360);
 
       if (viewMode === "3d") {
         const g = ctx.createLinearGradient(0, 0, 360, 360);
-        g.addColorStop(0, "#0B1020");
-        g.addColorStop(0.55, "#1B1147");
-        g.addColorStop(1, "#3A0F4A");
+        g.addColorStop(0, "#0A1417");
+        g.addColorStop(0.55, "#0D191C");
+        g.addColorStop(1, "#15282C");
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, 360, 360);
         // Soft floor glow
         const rg = ctx.createRadialGradient(180, 255, 10, 180, 255, 190);
-        rg.addColorStop(0, "rgba(236,72,153,0.28)");
-        rg.addColorStop(1, "rgba(236,72,153,0)");
+        rg.addColorStop(0, "rgba(14,178,154,0.24)");
+        rg.addColorStop(1, "rgba(14,178,154,0)");
         ctx.fillStyle = rg;
         ctx.fillRect(0, 0, 360, 360);
       }
@@ -364,12 +420,12 @@ export default function ChladniViewportPage() {
         ctx.strokeStyle = "#67E8F9";
         ctx.lineWidth = 2.5;
         ctx.beginPath();
-        quad.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+        trackedQuad.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
         ctx.closePath();
         ctx.stroke();
 
-        ctx.fillStyle = "#F0ABFC";
-        quad.forEach((p) => {
+        ctx.fillStyle = "#DDF0C2";
+        trackedQuad.forEach((p) => {
           ctx.beginPath();
           ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
           ctx.fill();
@@ -381,11 +437,11 @@ export default function ChladniViewportPage() {
         const sR = applyHomography(H, 1, scanV);
         const sg = ctx.createLinearGradient(sL.x, sL.y, sR.x, sR.y);
         sg.addColorStop(0, "rgba(34,211,238,0)");
-        sg.addColorStop(0.5, "rgba(244,114,182,0.95)");
+        sg.addColorStop(0.5, "rgba(14,178,154,0.95)");
         sg.addColorStop(1, "rgba(34,211,238,0)");
         ctx.strokeStyle = sg;
         ctx.lineWidth = 3.5;
-        ctx.shadowColor = "#F472B6";
+        ctx.shadowColor = "#0EB29A";
         ctx.shadowBlur = 16;
         ctx.beginPath();
         ctx.moveTo(sL.x, sL.y);
@@ -432,7 +488,7 @@ export default function ChladniViewportPage() {
           const wBox = ctx.measureText(tag).width + 14;
           const bx = base.x - wBox / 2;
           const by = base.y - 48;
-          ctx.fillStyle = "rgba(15,10,40,0.82)";
+          ctx.fillStyle = "rgba(13,25,28,0.88)";
           ctx.beginPath();
           ctx.roundRect(bx, by, wBox, 19, 9);
           ctx.fill();
@@ -448,7 +504,7 @@ export default function ChladniViewportPage() {
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [viewMode, activeMode.m, activeMode.n, activeMode.resonanceGain, quad]);
+  }, [viewMode, cameraActive, activeMode.m, activeMode.n, activeMode.resonanceGain, quad]);
 
   const toggleAudioDrive = async () => {
     if (isAudioOn) {
@@ -506,8 +562,9 @@ export default function ChladniViewportPage() {
       />
 
       <div className="p-4 space-y-3 flex-1 flex flex-col">
+        <TestGuide kind="ar" open={guideOpen} onDone={() => setGuideOpen(false)} />
         {/* Main viewport — always dark glass so neon colors pop */}
-        <div className="relative w-full aspect-square rounded-3xl overflow-hidden bg-gradient-to-br from-[#0B1020] via-[#1B1147] to-[#3A0F4A] shadow-xl shadow-fuchsia-500/20 ring-1 ring-white/10 flex items-center justify-center">
+        <div className="relative w-full aspect-square rounded-3xl overflow-hidden bg-gradient-to-br from-[#0A1417] via-[#0D191C] to-[#15282C] shadow-xl shadow-sky-500/20 ring-1 ring-white/10 flex items-center justify-center">
           {viewMode === "ar" && (
             <video
               ref={videoRef}
@@ -539,7 +596,7 @@ export default function ChladniViewportPage() {
                 <span className="text-[9px] text-white/70 block font-semibold">NATURAL PITCH</span>
                 <span className="text-sm font-extrabold text-white">{frequency} Hz</span>
               </div>
-              <span className="ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-fuchsia-500/80 text-white">
+              <span className="ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sky-500/80 text-white">
                 {activeMode.resonanceGain.toFixed(1)}×
               </span>
             </div>
@@ -579,7 +636,7 @@ export default function ChladniViewportPage() {
 
         {/* AI message */}
         {aiMessage && (
-          <div className="pop-in px-3.5 py-2.5 rounded-2xl brand-gradient-soft border border-fuchsia-200 dark:border-[#DB2777]/40 text-[12px] font-semibold text-fuchsia-900 dark:text-[#F5FDFF]">
+          <div className="pop-in px-3.5 py-2.5 rounded-2xl brand-gradient-soft border border-sky-200 dark:border-[#0EB29A]/40 text-[12px] font-semibold text-sky-900 dark:text-[#F5FDFF]">
             {aiMessage}
           </div>
         )}
@@ -621,7 +678,7 @@ export default function ChladniViewportPage() {
               step="5"
               value={frequency}
               onChange={(e) => setFrequency(Number(e.target.value))}
-              className="w-full accent-fuchsia-600 h-2 rounded-lg cursor-pointer"
+              className="w-full accent-sky-600 h-2 rounded-lg cursor-pointer"
             />
           </ChamferedCard>
         )}

@@ -27,7 +27,8 @@ import {
   getStoredThickness,
   MaterialData,
 } from "@/utils/physics";
-import { computePinnModal } from "@/utils/aiClient";
+import { TestGuide } from "@/components/guide/TestGuide";
+import { useAutoAdvance } from "@/context/autopilot";
 
 interface StandoffItem {
   id: string;
@@ -144,15 +145,6 @@ export default function ComponentSafetyPage() {
       }
     }
     ctx.putImageData(img, 0, 0);
-
-    // Ping PyTorch ModalPINNSurrogate when standoffs are placed
-    if (standoffs.length > 0) {
-      computePinnModal(
-        mode.m,
-        mode.n,
-        standoffs.map((s) => ({ nx: s.x / w, ny: s.y / h }))
-      ).then((res) => setPinnActive(Boolean(res)));
-    }
   }, [mode.m, mode.n, standoffs]);
 
   const computeScore = (comp: ComponentItem) => {
@@ -280,7 +272,8 @@ export default function ComponentSafetyPage() {
     setStandoffs((prev) => [...prev, { id: `ai-pin-${Date.now()}`, x: bestX, y: bestY }]);
   };
 
-  // 🤖 AUTOMATION: on entry, if any part sits in a danger zone, AI places a support screw by itself
+  // 🤖 AUTOMATION: once guide closes, if any part sits in a danger zone, AI places a support screw by itself
+  const [guideOpen, setGuideOpen] = useState<boolean>(true);
   const [aiNote, setAiNote] = useState<string | null>(null);
   const autoFixRef = useRef<() => void>(() => {});
   autoFixRef.current = () => {
@@ -293,9 +286,12 @@ export default function ComponentSafetyPage() {
     }
   };
   useEffect(() => {
-    const t = setTimeout(() => autoFixRef.current(), 1600);
+    if (guideOpen) return;
+    const t = setTimeout(() => autoFixRef.current(), 1200);
     return () => clearTimeout(t);
-  }, []);
+  }, [guideOpen]);
+
+  useAutoAdvance(!guideOpen, 3200, () => handleProceed());
 
   return (
     <div className="min-h-screen flex flex-col select-none transition-colors duration-200">
@@ -310,7 +306,7 @@ export default function ComponentSafetyPage() {
               setStandoffs([]);
               setAiNote(null);
             }}
-            className="w-9 h-9 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30 text-white"
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 dark:bg-[#15282C] border border-slate-200 dark:border-[#294044] text-slate-600 dark:text-[#8C999A]"
             title="Reset"
           >
             <RotateCcw className="w-4 h-4" />
@@ -319,6 +315,7 @@ export default function ComponentSafetyPage() {
       />
 
       <div className="p-4 space-y-4 flex-1 flex flex-col">
+        <TestGuide kind="safety" open={guideOpen} onDone={() => setGuideOpen(false)} />
         <ChamferedCard
           variant={isSafe ? "safe" : "danger"}
           className="p-3.5 flex items-center justify-between"
@@ -419,7 +416,7 @@ export default function ComponentSafetyPage() {
         </div>
 
         {aiNote && (
-          <div className="pop-in px-3.5 py-2.5 rounded-2xl brand-gradient-soft border border-fuchsia-200 dark:border-[#DB2777]/40 text-[12px] font-semibold text-fuchsia-900 dark:text-[#F5FDFF]">
+          <div className="pop-in px-3.5 py-2.5 rounded-2xl brand-gradient-soft border border-sky-200 dark:border-[#0EB29A]/40 text-[12px] font-semibold text-sky-900 dark:text-[#F5FDFF]">
             {aiNote}
           </div>
         )}

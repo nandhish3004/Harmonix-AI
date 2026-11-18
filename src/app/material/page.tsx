@@ -7,6 +7,7 @@ import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { MATERIAL_CONSTANTS, MaterialData } from "@/utils/physics";
+import { useAutoAdvance } from "@/context/autopilot";
 
 interface MaterialConfig extends MaterialData {
   emoji: string;
@@ -104,11 +105,73 @@ export default function MaterialSelectionPage() {
   const [selectedMaterialId, setSelectedMaterialId] = useState<string>("fr4");
   const [thicknessMm, setThicknessMm] = useState<number>(1.6);
   const [area, setArea] = useState<number | null>(null);
+  const [aiReason, setAiReason] = useState<string | null>(null);
+  const [aiReady, setAiReady] = useState<boolean>(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       const a = Number(localStorage.getItem("harmonix_plate_area"));
       if (Number.isFinite(a) && a > 0) setArea(a);
+
+      // 🤖 AI material guess: Hugging Face label first, otherwise colour analysis of the scanned board
+      const hf = localStorage.getItem("harmonix_hf_material");
+      const hfLabel = localStorage.getItem("harmonix_hf_material_label");
+      const applyGuess = (id: string, reason: string) => {
+        setSelectedMaterialId(id);
+        setThicknessMm(id === "fr4" ? 1.6 : 3.0);
+        setAiReason(reason);
+        setAiReady(true);
+      };
+      if (hf && ["fr4", "al6061", "steel", "acrylic"].includes(hf)) {
+        applyGuess(hf, `Hugging Face recognised "${hfLabel ?? hf}" in your scan.`);
+      } else {
+        const thumb = localStorage.getItem("harmonix_scan_thumb");
+        if (thumb) {
+          const img = new Image();
+          img.onload = () => {
+            const c = document.createElement("canvas");
+            c.width = 24;
+            c.height = 24;
+            const ctx = c.getContext("2d");
+            if (!ctx) {
+              applyGuess("fr4", "Defaulting to the most common material.");
+              return;
+            }
+            ctx.drawImage(img, 0, 0, 24, 24);
+            const d = ctx.getImageData(0, 0, 24, 24).data;
+            let r = 0;
+            let g = 0;
+            let b = 0;
+            const n = d.length / 4;
+            for (let i = 0; i < d.length; i += 4) {
+              r += d[i];
+              g += d[i + 1];
+              b += d[i + 2];
+            }
+            r /= n;
+            g /= n;
+            b /= n;
+            const mx = Math.max(r, g, b);
+            const mn = Math.min(r, g, b);
+            const sat = mx === 0 ? 0 : (mx - mn) / mx;
+            const bright = mx / 255;
+            if (g > r * 1.1 && g > b * 1.04 && sat > 0.2) {
+              applyGuess("fr4", "Your board is mostly green, typical of a circuit board (FR4).");
+            } else if (sat < 0.22 && bright > 0.58) {
+              applyGuess("al6061", "Light silvery-grey surface, it looks like aluminium.");
+            } else if (sat < 0.22) {
+              applyGuess("steel", "Dark grey surface, it looks like steel.");
+            } else {
+              applyGuess("fr4", "Colour was unclear, so I chose the most common material.");
+            }
+          };
+          img.onerror = () => applyGuess("fr4", "Defaulting to the most common material.");
+          img.src = thumb;
+        } else {
+          setAiReason("No scan colour data yet, so I chose the most common material (FR4).");
+          setAiReady(true);
+        }
+      }
     }
   }, []);
 
@@ -122,17 +185,20 @@ export default function MaterialSelectionPage() {
     router.push("/viewport");
   };
 
+  // 🤖 Autopilot: confirm the AI's pick automatically after a short pause
+  useAutoAdvance(aiReady, 3200, () => handleConfirm());
+
   return (
     <div className="min-h-screen flex flex-col">
       <HudHeader title="Pick Material" step="SCREEN 03 // 10" backHref="/scan" />
 
       <div className="p-4 space-y-4 flex-1">
         {/* AI recommendation */}
-        <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl brand-gradient-soft border border-fuchsia-200 dark:border-[#DB2777]/40 text-[12px] font-semibold text-fuchsia-900 dark:text-[#F5FDFF]">
-          <Sparkles className="w-4 h-4 text-fuchsia-600 shrink-0" />
+        <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl brand-gradient-soft border border-sky-200 dark:border-[#0EB29A]/40 text-[12px] font-semibold text-sky-900 dark:text-[#F5FDFF]">
+          <Sparkles className="w-4 h-4 text-sky-600 shrink-0" />
           <span>
-            AI suggests <b>Circuit Board (FR4), Standard</b>
-            {area ? ` for your ${Math.round(area / 100) / 10} cm² scan` : ""}. Just tap Continue, or choose another.
+            <b>AI pick:</b> {aiReason ?? "analysing your scan…"} Tap another card to override.
+            {area ? ` (Scanned area ≈ ${Math.round(area / 100) / 10} cm²)` : ""}
           </span>
         </div>
 
@@ -167,8 +233,8 @@ export default function MaterialSelectionPage() {
                     <p className="text-[11px] text-slate-500 dark:text-[#8C999A] leading-snug mt-0.5">{mat.plain}</p>
                   </div>
                   <div className="space-y-1.5 mt-auto pt-1">
-                    <Meter label="Stiffness" value={mat.youngsModulusGpa / 200} from="#22D3EE" to="#7C3AED" />
-                    <Meter label="Weight" value={mat.densityKgM3 / 7850} from="#FBBF24" to="#F97316" />
+                    <Meter label="Stiffness" value={mat.youngsModulusGpa / 200} from="#22D3EE" to="#0284C7" />
+                    <Meter label="Weight" value={mat.densityKgM3 / 7850} from="#FBBF24" to="#F59E0B" />
                   </div>
                 </ChamferedCard>
               </button>
@@ -188,7 +254,7 @@ export default function MaterialSelectionPage() {
                   onClick={() => setThicknessMm(t.mm)}
                   className={`rounded-2xl py-2.5 px-1 text-center border-2 transition-all active:scale-95 ${
                     on
-                      ? "brand-gradient text-white border-transparent shadow-md shadow-fuchsia-400/40"
+                      ? "brand-gradient text-white border-transparent shadow-md shadow-sky-400/40"
                       : "bg-white dark:bg-[#15282C] border-slate-200 dark:border-[#294044] text-slate-700 dark:text-[#F5FDFF]"
                   }`}
                 >

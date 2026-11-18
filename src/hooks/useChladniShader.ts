@@ -125,7 +125,7 @@ export function useChladniShader(
 
       // Meta-style dark glass plate: neon colors pop in both light & dark app themes
       ctx.globalCompositeOperation = "source-over";
-      ctx.fillStyle = "rgba(8, 10, 32, 0.30)";
+      ctx.fillStyle = "rgba(13, 25, 28, 0.30)";
       ctx.fillRect(0, 0, width, height);
 
       const m = modeMRef.current;
@@ -156,7 +156,7 @@ export function useChladniShader(
 
       // Bucket particles by displacement so each color is drawn with a single fill
       const buckets: number[][] = [[], [], [], []];
-      const BUCKET_COLORS = ["#67E8F9", "#A78BFA", "#F472B6", "#FBBF24"];
+      const BUCKET_COLORS = ["#38BDF8", "#0EB29A", "#DDF0C2", "#F59E0B"];
 
       for (let i = 0; i < count; i += 2) {
         let px = particles[i * 4];

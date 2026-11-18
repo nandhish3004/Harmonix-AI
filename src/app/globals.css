@@ -26,18 +26,24 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Brand gradient (Swiggy/Instamart-style vibrant) */
+/* Brand accents (original engineering palette: sky in light mode, teal in dark mode) */
 .brand-gradient {
-  background: linear-gradient(135deg, #7C3AED 0%, #DB2777 50%, #F97316 100%);
+  background: linear-gradient(135deg, #0369A1 0%, #0284C7 100%);
+}
+.dark .brand-gradient {
+  background: linear-gradient(135deg, #0B8F7C 0%, #0EB29A 100%);
 }
 .brand-gradient-soft {
-  background: linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(219,39,119,0.10) 50%, rgba(249,115,22,0.10) 100%);
+  background: linear-gradient(135deg, rgba(2,132,199,0.08) 0%, rgba(2,132,199,0.04) 100%);
+}
+.dark .brand-gradient-soft {
+  background: linear-gradient(135deg, rgba(14,178,154,0.14) 0%, rgba(14,178,154,0.06) 100%);
 }
 .brand-text {
-  background: linear-gradient(90deg, #7C3AED, #DB2777, #F97316);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: #0369A1;
+}
+.dark .brand-text {
+  color: #0EB29A;
 }
 
 @keyframes pop-in {
