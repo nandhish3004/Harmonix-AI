@@ -206,8 +206,14 @@ export default function WorkpieceScanPage() {
     if (isLocked) unlockBoundary();
     setIsAiRunning(true);
     try {
-      // 1️⃣ Hugging Face OWL-ViT zero-shot detection (server-side). The snapshot uses the same
-      //    object-cover crop the user sees, so detected boxes line up exactly with the screen.
+      // Step A: Instantaneous (<20ms) region-growing + Sobel barrier CV snap
+      const snapped = detectOnce();
+      if (snapped) {
+        setAiEngine("Region-Growing + Sobel CV");
+        setScanMessage("Snapped P1–P4 to workpiece contour. Refining with Hugging Face…");
+      }
+
+      // Step B: Fast Hugging Face detection / material ID (3.5s cap so UI never hangs)
       if (containerRef.current && (cameraActive || uploadedImageUrl)) {
         const rect = containerRef.current.getBoundingClientRect();
         const cw = Math.round(rect.width) || 360;
@@ -285,16 +291,19 @@ export default function WorkpieceScanPage() {
           }
         }
       }
-      setAiEngine("On-device CV");
+      setAiEngine("Region-Growing + Sobel CV");
 
-      // Instant Browser Sobel CV fallback
-      const found = detectOnce();
-      if (found) {
-        setScanMessage("Browser Sobel CV snapped P1–P4 to strongest workpiece edges.");
-      } else if (!cameraActive && !uploadedImageUrl) {
-        setScanMessage("No camera/photo yet — click SAMPLE PCB or PHOTO below to test CV!");
+      if (!snapped) {
+        const found = detectOnce();
+        if (found) {
+          setScanMessage("Region-growing CV snapped P1–P4 to workpiece.");
+        } else if (!cameraActive && !uploadedImageUrl) {
+          setScanMessage("No camera/photo yet — click SAMPLE or PHOTO below.");
+        } else {
+          setScanMessage("Low contrast — place board flat on a plain desk or drag P1–P4.");
+        }
       } else {
-        setScanMessage("Low edge contrast — adjust lighting or drag P1–P4 manually.");
+        setScanMessage("Workpiece contour snapped (on-device CV).");
       }
       setTimeout(() => setScanMessage(null), 3500);
     } finally {

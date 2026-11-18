@@ -1,8 +1,12 @@
 /**
  * Client for Hugging Face Inference — tries /api/ai/* if HF_TOKEN is configured,
- * and seamlessly runs free in-browser ONNX models via @huggingface/transformers.
+ * and seamlessly runs fast quantized in-browser ONNX models (YOLOS-Tiny / CLIP / AST).
  */
-import { classifyAudioInBrowser, classifyBoardInBrowser } from "@/utils/browserHf";
+import {
+  classifyAudioInBrowser,
+  classifyBoardInBrowser,
+  detectObjectInBrowser,
+} from "@/utils/browserHf";
 
 export interface AiHealth {
   status: "online" | "offline";
@@ -29,7 +33,7 @@ export async function checkAiHealth(): Promise<AiHealth> {
     hfConfigured: true,
     mode: "browser-onnx",
     models: {
-      vision: "Xenova/clip-vit-base-patch32 (ONNX)",
+      vision: "Xenova/yolos-tiny + clip-vit (ONNX)",
       audio: "Xenova/ast-finetuned-audioset (ONNX)",
     },
   };
@@ -39,7 +43,6 @@ export interface BoardDetection {
   model: string;
   label: string;
   score: number;
-  /** Optional bounding box when cloud object detector returns localization */
   box?: { xmin: number; ymin: number; xmax: number; ymax: number };
   materialId: "fr4" | "al6061" | "steel" | "acrylic" | null;
 }
@@ -50,16 +53,17 @@ function materialFromLabel(label: string): BoardDetection["materialId"] {
   if (l.includes("aluminium") || l.includes("aluminum")) return "al6061";
   if (l.includes("steel")) return "steel";
   if (l.includes("acrylic")) return "acrylic";
+  if (l.includes("cell phone") || l.includes("remote") || l.includes("laptop")) return "fr4";
   return null;
 }
 
-/** Zero-shot board & material detection (Cloud OWL-ViT if HF_TOKEN set, else in-browser CLIP ONNX). */
+/** Fast object + material detection (Cloud OWL-ViT if HF_TOKEN set, else in-browser YOLOS-Tiny ONNX). */
 export async function detectBoardHF(image: Blob): Promise<BoardDetection | null> {
   try {
     const form = new FormData();
     form.append("file", image, "frame.jpg");
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 18000);
+    const timer = setTimeout(() => controller.abort(), 3500);
     const res = await fetch("/api/ai/detect", { method: "POST", body: form, signal: controller.signal });
     clearTimeout(timer);
     if (res.ok) {
@@ -81,17 +85,30 @@ export async function detectBoardHF(image: Blob): Promise<BoardDetection | null>
       }
     }
   } catch {
-    // fallback to in-browser Hugging Face ONNX
+    // fallback to fast in-browser YOLOS-Tiny ONNX
   }
 
-  const localRes = await classifyBoardInBrowser(image);
-  if (!localRes) return null;
-  return {
-    model: localRes.model,
-    label: localRes.label,
-    score: localRes.score,
-    materialId: localRes.materialId,
-  };
+  const obj = await detectObjectInBrowser(image, 3500);
+  if (obj) {
+    return {
+      model: obj.model,
+      label: obj.label,
+      score: obj.score,
+      box: obj.box,
+      materialId: materialFromLabel(obj.label),
+    };
+  }
+
+  const cls = await classifyBoardInBrowser(image, 2500);
+  if (cls) {
+    return {
+      model: cls.model,
+      label: cls.label,
+      score: cls.score,
+      materialId: cls.materialId,
+    };
+  }
+  return null;
 }
 
 export interface TapSoundLabels {
@@ -106,7 +123,7 @@ export async function classifyTapHF(
 ): Promise<TapSoundLabels | null> {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 18000);
+    const timer = setTimeout(() => controller.abort(), 3500);
     const res = await fetch("/api/ai/audio", {
       method: "POST",
       headers: { "Content-Type": "audio/wav" },
@@ -125,7 +142,7 @@ export async function classifyTapHF(
   }
 
   if (rawSamples16k) {
-    return classifyAudioInBrowser(rawSamples16k);
+    return classifyAudioInBrowser(rawSamples16k, 3500);
   }
   return null;
 }

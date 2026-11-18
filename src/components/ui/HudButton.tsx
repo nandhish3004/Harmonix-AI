@@ -59,9 +59,9 @@ export const HudButton: React.FC<HudButtonProps> = ({
       {...props}
     >
       {isLoading ? (
-        <span className="flex items-center space-x-2">
+        <span className="flex items-center justify-center gap-1.5 min-w-0">
           <svg
-            className="animate-spin -ml-1 mr-2 h-4 w-4"
+            className="animate-spin h-3.5 w-3.5 shrink-0"
             fill="none"
             viewBox="0 0 24 24"
           >
@@ -79,7 +79,9 @@ export const HudButton: React.FC<HudButtonProps> = ({
               d="M4 12a8 8 0 018-8v8H4z"
             />
           </svg>
-          <span>PROCESSING...</span>
+          <span className={size === "lg" ? "text-xs truncate" : "text-[11px] truncate"}>
+            {size === "lg" ? "Working…" : "Wait…"}
+          </span>
         </span>
       ) : (
         children

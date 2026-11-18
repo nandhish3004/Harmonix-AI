@@ -133,23 +133,58 @@ export function detectQuadFromSource(
     bgB /= bgCount;
   }
 
-  // 2. 3x3 Gaussian-weighted blur to suppress noise
+  // 2. 5x5 Box-Blurred RGB Map + 3x3 Grayscale Blur
+  const blurR = new Float32Array(total);
+  const blurG = new Float32Array(total);
+  const blurB = new Float32Array(total);
   const blurred = new Float32Array(total);
-  for (let y = 1; y < procH - 1; y++) {
-    for (let x = 1; x < procW - 1; x++) {
+  const skinMask = new Uint8Array(total);
+
+  for (let y = 0; y < procH; y++) {
+    for (let x = 0; x < procW; x++) {
       const i = y * procW + x;
-      blurred[i] =
-        (gray[i - procW - 1] + 2 * gray[i - procW] + gray[i - procW + 1] +
-          2 * gray[i - 1] + 4 * gray[i] + 2 * gray[i + 1] +
-          gray[i + procW - 1] + 2 * gray[i + procW] + gray[i + procW + 1]) /
-        16;
+      const dIdx = i * 4;
+      const r = data[dIdx];
+      const g = data[dIdx + 1];
+      const b = data[dIdx + 2];
+      if (
+        r > 95 &&
+        g > 40 &&
+        b > 20 &&
+        r > g &&
+        r - g > 15 &&
+        r - b > 15 &&
+        Math.abs(r - g) < 110
+      ) {
+        skinMask[i] = 1;
+      }
+
+      const x0 = Math.max(0, x - 2);
+      const x1 = Math.min(procW - 1, x + 2);
+      const y0 = Math.max(0, y - 2);
+      const y1 = Math.min(procH - 1, y + 2);
+      let sr = 0, sg = 0, sb = 0, sgray = 0, cnt = 0;
+      for (let yy = y0; yy <= y1; yy++) {
+        for (let xx = x0; xx <= x1; xx++) {
+          const j = yy * procW + xx;
+          const p = j * 4;
+          sr += data[p];
+          sg += data[p + 1];
+          sb += data[p + 2];
+          sgray += gray[j];
+          cnt++;
+        }
+      }
+      blurR[i] = sr / cnt;
+      blurG[i] = sg / cnt;
+      blurB[i] = sb / cnt;
+      blurred[i] = sgray / cnt;
     }
   }
 
-  // 3. Sobel Edge Magnitude
+  // 3. Pure Sobel Edge Magnitude (used strictly as barrier — never mixed with colorDist)
   const mag = new Float32Array(total);
   let sumMag = 0;
-  let maxMag = 0;
   const margin = 4;
 
   for (let y = margin; y < procH - margin; y++) {
@@ -162,173 +197,183 @@ export function detectQuadFromSource(
       const gy =
         -blurred[i - procW - 1] - 2 * blurred[i - procW] - blurred[i - procW + 1] +
         blurred[i + procW - 1] + 2 * blurred[i + procW] + blurred[i + procW + 1];
-      const rawMag = Math.abs(gx) + Math.abs(gy);
-
-      // Combine gradient magnitude with border-contrast saliency and reject skin tones
-      const dIdx = i * 4;
-      const r = data[dIdx];
-      const g = data[dIdx + 1];
-      const b = data[dIdx + 2];
-      const colorDist = Math.abs(r - bgR) + Math.abs(g - bgG) + Math.abs(b - bgB);
-      const isSkin =
-        r > 95 &&
-        g > 40 &&
-        b > 20 &&
-        r > g &&
-        r - g > 15 &&
-        r - b > 15 &&
-        Math.abs(r - g) < 110;
-      const m = isSkin ? rawMag * 0.35 : rawMag + colorDist * 0.22;
-
+      const m = Math.abs(gx) + Math.abs(gy);
       mag[i] = m;
       sumMag += m;
-      if (m > maxMag) maxMag = m;
     }
   }
 
   const meanMag = sumMag / total;
-  const threshold = Math.max(68, meanMag * 2.7);
+  const edgeBarrier = Math.max(95, meanMag * 3.1);
 
-  // 4. Build binary edge mask (dilated 1px) so broken object borders connect cleanly
-  const edgeMask = new Uint8Array(total);
-  const dilated = new Uint8Array(total);
-  let edgeCount = 0;
-  for (let y = margin; y < procH - margin; y++) {
-    for (let x = margin; x < procW - margin; x++) {
-      const i = y * procW + x;
-      if (mag[i] >= threshold) {
-        edgeMask[i] = 1;
-        edgeCount++;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            dilated[(y + dy) * procW + (x + dx)] = 1;
-          }
-        }
-      }
+  // 4. Multi-Seed Region Growing across 15 interior seed points
+  const seedCoords: [number, number][] = [];
+  for (const u of [0.25, 0.38, 0.5, 0.62, 0.75]) {
+    for (const v of [0.28, 0.5, 0.72]) {
+      seedCoords.push([Math.round(u * procW), Math.round(v * procH)]);
     }
   }
 
-  if (edgeCount < 30) {
-    return { corners: null, confidence: Math.min(25, edgeCount) };
-  }
-
-  // 5. Connected-component labeling (BFS) to isolate foreground workpiece from room/tile background
-  const visited = new Uint8Array(total);
+  const visitedGlobal = new Uint8Array(total);
+  const queue = new Int32Array(total);
   const cxFrame = procW * 0.5;
   const cyFrame = procH * 0.5;
-  const queue = new Int32Array(total);
+  const maxDist = Math.hypot(cxFrame, cyFrame);
 
   let bestScore = -1;
   let bestCorners: Point2D[] | null = null;
-  let bestPixels: number[] = [];
+  let bestRegionPixels: number[] = [];
+  let bestFillRatio = 0;
 
-  for (let y = margin; y < procH - margin; y++) {
-    for (let x = margin; x < procW - margin; x++) {
-      const start = y * procW + x;
-      if (!dilated[start] || visited[start]) continue;
+  for (const [sx, sy] of seedCoords) {
+    if (sx < margin || sx >= procW - margin || sy < margin || sy >= procH - margin) continue;
+    const startIdx = sy * procW + sx;
+    if (skinMask[startIdx] || visitedGlobal[startIdx]) continue;
 
-      let head = 0;
-      let tail = 0;
-      queue[tail++] = start;
-      visited[start] = 1;
+    const sr = blurR[startIdx];
+    const sg = blurG[startIdx];
+    const sb = blurB[startIdx];
 
-      const compPixels: number[] = [];
-      let minX = procW, maxX = 0, minY = procH, maxY = 0;
-      let sumX = 0, sumY = 0;
-      let minSum = Infinity, maxSum = -Infinity;
-      let minDiff = Infinity, maxDiff = -Infinity;
-      let p1x = 0, p1y = 0, p2x = 0, p2y = 0, p3x = 0, p3y = 0, p4x = 0, p4y = 0;
+    const visitedLocal = new Uint8Array(total);
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = startIdx;
+    visitedLocal[startIdx] = 1;
+    visitedGlobal[startIdx] = 1;
 
-      while (head < tail) {
-        const idx = queue[head++];
-        const px = idx % procW;
-        const py = (idx - px) / procW;
+    const regionPixels: number[] = [];
+    let minX = procW, maxX = 0, minY = procH, maxY = 0;
+    let sumX = 0, sumY = 0;
+    let minSum = Infinity, maxSum = -Infinity;
+    let minDiff = Infinity, maxDiff = -Infinity;
+    let p1x = 0, p1y = 0, p2x = 0, p2y = 0, p3x = 0, p3y = 0, p4x = 0, p4y = 0;
 
-        if (edgeMask[idx]) {
-          compPixels.push(idx);
-          sumX += px;
-          sumY += py;
-          if (px < minX) minX = px;
-          if (px > maxX) maxX = px;
-          if (py < minY) minY = py;
-          if (py > maxY) maxY = py;
+    while (head < tail) {
+      const idx = queue[head++];
+      const px = idx % procW;
+      const py = (idx - px) / procW;
 
-          const s = px + py;
-          const d = px - py;
-          if (s < minSum) { minSum = s; p1x = px; p1y = py; }
-          if (d > maxDiff) { maxDiff = d; p2x = px; p2y = py; }
-          if (s > maxSum) { maxSum = s; p3x = px; p3y = py; }
-          if (d < minDiff) { minDiff = d; p4x = px; p4y = py; }
-        }
+      regionPixels.push(idx);
+      sumX += px;
+      sumY += py;
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
 
-        // 8-neighbors
-        for (let dy = -1; dy <= 1; dy++) {
-          const ny = py + dy;
-          if (ny < margin || ny >= procH - margin) continue;
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dy === 0) continue;
-            const nx = px + dx;
-            if (nx < margin || nx >= procW - margin) continue;
-            const nIdx = ny * procW + nx;
-            if (dilated[nIdx] && !visited[nIdx]) {
-              visited[nIdx] = 1;
-              queue[tail++] = nIdx;
-            }
-          }
-        }
+      const s = px + py;
+      const d = px - py;
+      if (s < minSum) { minSum = s; p1x = px; p1y = py; }
+      if (d > maxDiff) { maxDiff = d; p2x = px; p2y = py; }
+      if (s > maxSum) { maxSum = s; p3x = px; p3y = py; }
+      if (d < minDiff) { minDiff = d; p4x = px; p4y = py; }
+
+      // 4-connected growth bounded by seed similarity and step-edge barriers
+      const neighbors = [
+        px > 2 ? idx - 1 : -1,
+        px < procW - 3 ? idx + 1 : -1,
+        py > 2 ? idx - procW : -1,
+        py < procH - 3 ? idx + procW : -1,
+      ];
+      for (const nIdx of neighbors) {
+        if (nIdx < 0 || visitedLocal[nIdx] || skinMask[nIdx]) continue;
+        const seedDiff =
+          Math.abs(blurR[nIdx] - sr) +
+          Math.abs(blurG[nIdx] - sg) +
+          Math.abs(blurB[nIdx] - sb);
+        if (seedDiff >= 62) continue;
+
+        const stepDiff =
+          Math.abs(blurR[nIdx] - blurR[idx]) +
+          Math.abs(blurG[nIdx] - blurG[idx]) +
+          Math.abs(blurB[nIdx] - blurB[idx]);
+        if (stepDiff >= 28 || mag[nIdx] >= edgeBarrier) continue;
+
+        visitedLocal[nIdx] = 1;
+        visitedGlobal[nIdx] = 1;
+        queue[tail++] = nIdx;
       }
+    }
 
-      if (compPixels.length < 28) continue;
-      const bw = maxX - minX;
-      const bh = maxY - minY;
-      const boxArea = bw * bh;
-      const frameArea = procW * procH;
-      // Reject tiny noise or full-frame background spans (> 78% of frame)
-      if (boxArea < frameArea * 0.04 || boxArea > frameArea * 0.78) continue;
+    const areaCount = regionPixels.length;
+    if (areaCount < total * 0.035) continue;
 
-      const centroidX = sumX / compPixels.length;
-      const centroidY = sumY / compPixels.length;
-      const distToCenter = Math.hypot(centroidX - cxFrame, centroidY - cyFrame) / Math.hypot(cxFrame, cyFrame);
-      const centrality = Math.max(0.15, 1.0 - distToCenter * 1.15);
-      const score = compPixels.length * centrality;
+    const bw = maxX - minX + 1;
+    const bh = maxY - minY + 1;
+    const boxArea = bw * bh;
+    if (boxArea > total * 0.72) continue;
 
-      if (score > bestScore) {
-        bestScore = score;
-        bestPixels = compPixels;
-        const scaleX = targetWidth / procW;
-        const scaleY = targetHeight / procH;
-        bestCorners = [
-          { x: Math.round(p1x * scaleX), y: Math.round(p1y * scaleY), label: "P1" },
-          { x: Math.round(p2x * scaleX), y: Math.round(p2y * scaleY), label: "P2" },
-          { x: Math.round(p3x * scaleX), y: Math.round(p3y * scaleY), label: "P3" },
-          { x: Math.round(p4x * scaleX), y: Math.round(p4y * scaleY), label: "P4" },
-        ];
-      }
+    // Reject regions touching 3 or more outer borders of the frame
+    let bordersTouched = 0;
+    if (minX <= 5) bordersTouched++;
+    if (maxX >= procW - 6) bordersTouched++;
+    if (minY <= 5) bordersTouched++;
+    if (maxY >= procH - 6) bordersTouched++;
+    if (bordersTouched >= 3) continue;
+
+    const fillRatio = areaCount / Math.max(1, boxArea);
+    if (fillRatio < 0.48) continue;
+
+    const bgDiff = Math.abs(sr - bgR) + Math.abs(sg - bgG) + Math.abs(sb - bgB);
+    const centroidX = sumX / areaCount;
+    const centroidY = sumY / areaCount;
+    const distToCenter = Math.hypot(centroidX - cxFrame, centroidY - cyFrame);
+    const centrality = Math.max(0.15, 1.0 - 0.85 * (distToCenter / Math.max(1, maxDist)));
+    const score =
+      areaCount *
+      Math.pow(fillRatio, 1.5) *
+      centrality *
+      (1 + Math.min(1.5, bgDiff / 80));
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestRegionPixels = regionPixels;
+      bestFillRatio = fillRatio;
+      const scaleX = targetWidth / procW;
+      const scaleY = targetHeight / procH;
+      bestCorners = [
+        { x: Math.round(p1x * scaleX), y: Math.round(p1y * scaleY), label: "P1" },
+        { x: Math.round(p2x * scaleX), y: Math.round(p2y * scaleY), label: "P2" },
+        { x: Math.round(p3x * scaleX), y: Math.round(p3y * scaleY), label: "P3" },
+        { x: Math.round(p4x * scaleX), y: Math.round(p4y * scaleY), label: "P4" },
+      ];
     }
   }
 
-  // Render overlay highlighting the locked foreground object edges
+  // Render overlay highlighting detected object contour + subtle interior mask
   if (overlayCanvas) {
     overlayCanvas.width = procW;
     overlayCanvas.height = procH;
     const overlayCtx = overlayCanvas.getContext("2d");
     if (overlayCtx) {
       const overlayData = overlayCtx.createImageData(procW, procH);
-      for (let i = 0; i < total; i++) {
-        if (edgeMask[i]) {
-          const oIdx = i * 4;
+      const regionMask = new Uint8Array(total);
+      for (const idx of bestRegionPixels) regionMask[idx] = 1;
+
+      for (const idx of bestRegionPixels) {
+        const px = idx % procW;
+        const py = (idx - px) / procW;
+        const isEdge =
+          px <= 1 ||
+          px >= procW - 2 ||
+          py <= 1 ||
+          py >= procH - 2 ||
+          !regionMask[idx - 1] ||
+          !regionMask[idx + 1] ||
+          !regionMask[idx - procW] ||
+          !regionMask[idx + procW];
+        const oIdx = idx * 4;
+        if (isEdge) {
+          overlayData.data[oIdx] = 52;
+          overlayData.data[oIdx + 1] = 211;
+          overlayData.data[oIdx + 2] = 153;
+          overlayData.data[oIdx + 3] = 245;
+        } else {
           overlayData.data[oIdx] = 14;
           overlayData.data[oIdx + 1] = 178;
           overlayData.data[oIdx + 2] = 154;
-          overlayData.data[oIdx + 3] = 95;
+          overlayData.data[oIdx + 3] = 55;
         }
-      }
-      for (const idx of bestPixels) {
-        const oIdx = idx * 4;
-        overlayData.data[oIdx] = 52;
-        overlayData.data[oIdx + 1] = 211;
-        overlayData.data[oIdx + 2] = 153;
-        overlayData.data[oIdx + 3] = 245;
       }
       overlayCtx.putImageData(overlayData, 0, 0);
     }
@@ -338,7 +383,7 @@ export function detectQuadFromSource(
     return { corners: null, confidence: 28 };
   }
 
-  const confidence = Math.min(99, Math.round(62 + (bestPixels.length / total) * 520));
+  const confidence = Math.min(99, Math.round(68 + bestFillRatio * 30));
   return { corners: bestCorners, confidence };
 }
 
