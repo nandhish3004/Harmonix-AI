@@ -1,12 +1,8 @@
 /**
- * Client for Hugging Face Inference — tries /api/ai/* if HF_TOKEN is configured,
- * and seamlessly runs fast quantized in-browser ONNX models (YOLOS-Tiny / CLIP / AST).
+ * Client for Hugging Face Inference — checks once whether cloud HF_TOKEN is configured,
+ * and otherwise skips dead network POSTs to run fast off-main-thread ONNX MobileViT + Spectral CV / AST.
  */
-import {
-  classifyAudioInBrowser,
-  classifyBoardInBrowser,
-  detectObjectInBrowser,
-} from "@/utils/browserHf";
+import { classifyAudioInBrowser, classifyBoardInBrowser } from "@/utils/browserHf";
 
 export interface AiHealth {
   status: "online" | "offline";
@@ -15,11 +11,33 @@ export interface AiHealth {
   models?: { vision: string; audio: string };
 }
 
+let cloudHfConfigured: boolean | null = null;
+
+async function isCloudHfAvailable(): Promise<boolean> {
+  if (cloudHfConfigured !== null) return cloudHfConfigured;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch("/api/ai/health", { cache: "no-store", signal: controller.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json();
+      cloudHfConfigured = Boolean(data?.hfConfigured);
+      return cloudHfConfigured;
+    }
+  } catch {
+    // offline or error -> avoid stalling on cloud routes
+  }
+  cloudHfConfigured = false;
+  return false;
+}
+
 export async function checkAiHealth(): Promise<AiHealth> {
   try {
     const res = await fetch("/api/ai/health", { cache: "no-store" });
     if (res.ok) {
       const data = await res.json();
+      cloudHfConfigured = Boolean(data?.hfConfigured);
       if (data.hfConfigured) {
         return { ...data, status: "online", mode: "cloud" };
       }
@@ -27,13 +45,14 @@ export async function checkAiHealth(): Promise<AiHealth> {
   } catch {
     // ignore and report browser ONNX mode
   }
+  cloudHfConfigured = false;
 
   return {
     status: "online",
     hfConfigured: true,
     mode: "browser-onnx",
     models: {
-      vision: "Xenova/yolos-tiny + clip-vit (ONNX)",
+      vision: "Xenova/mobilevit-small (ONNX)",
       audio: "Xenova/ast-finetuned-audioset (ONNX)",
     },
   };
@@ -69,52 +88,43 @@ function materialFromLabel(label: string): BoardDetection["materialId"] {
   return null;
 }
 
-/** Fast object + material detection (Cloud OWL-ViT if HF_TOKEN set, else in-browser YOLOS-Tiny ONNX + cropped CLIP ROI). */
+/** Fast board identification (Cloud OWL-ViT if HF_TOKEN set, else MobileViT-small + Spectral CV). */
 export async function detectBoardHF(
   fullImage: Blob,
   croppedImage?: Blob
 ): Promise<BoardDetection | null> {
-  try {
-    const form = new FormData();
-    form.append("file", fullImage, "frame.jpg");
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3500);
-    const res = await fetch("/api/ai/detect", { method: "POST", body: form, signal: controller.signal });
-    clearTimeout(timer);
-    if (res.ok) {
-      const data = (await res.json()) as {
-        model: string;
-        detections: { score: number; label: string; box: NonNullable<BoardDetection["box"]> }[];
-      };
-      if (Array.isArray(data.detections) && data.detections.length > 0) {
-        const best = [...data.detections].sort((a, b) => b.score - a.score)[0];
-        if (best && best.score >= 0.04) {
-          return {
-            model: data.model,
-            label: best.label,
-            score: best.score,
-            box: best.box,
-            materialId: materialFromLabel(best.label),
-          };
+  if (await isCloudHfAvailable()) {
+    try {
+      const form = new FormData();
+      form.append("file", fullImage, "frame.jpg");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch("/api/ai/detect", { method: "POST", body: form, signal: controller.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = (await res.json()) as {
+          model: string;
+          detections: { score: number; label: string; box: NonNullable<BoardDetection["box"]> }[];
+        };
+        if (Array.isArray(data.detections) && data.detections.length > 0) {
+          const best = [...data.detections].sort((a, b) => b.score - a.score)[0];
+          if (best && best.score >= 0.04) {
+            return {
+              model: data.model,
+              label: best.label,
+              score: best.score,
+              box: best.box,
+              materialId: materialFromLabel(best.label),
+            };
+          }
         }
       }
+    } catch {
+      // fallback to fast in-browser MobileViT + Spectral CV
     }
-  } catch {
-    // fallback to fast in-browser YOLOS-Tiny ONNX
   }
 
-  const obj = await detectObjectInBrowser(fullImage, 3500);
-  if (obj) {
-    return {
-      model: obj.model,
-      label: obj.label,
-      score: obj.score,
-      box: obj.box,
-      materialId: materialFromLabel(obj.label),
-    };
-  }
-
-  const cls = await classifyBoardInBrowser(croppedImage ?? fullImage, 3500);
+  const cls = await classifyBoardInBrowser(croppedImage ?? fullImage, 900);
   if (cls) {
     return {
       model: cls.model,
@@ -136,28 +146,30 @@ export async function classifyTapHF(
   wav: Blob,
   rawSamples16k?: Float32Array
 ): Promise<TapSoundLabels | null> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3500);
-    const res = await fetch("/api/ai/audio", {
-      method: "POST",
-      headers: { "Content-Type": "audio/wav" },
-      body: wav,
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    if (res.ok) {
-      const data = (await res.json()) as { model: string; labels: { label: string; score: number }[] };
-      if (Array.isArray(data.labels) && data.labels.length > 0) {
-        return { model: data.model, labels: data.labels.slice(0, 4) };
+  if (await isCloudHfAvailable()) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch("/api/ai/audio", {
+        method: "POST",
+        headers: { "Content-Type": "audio/wav" },
+        body: wav,
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = (await res.json()) as { model: string; labels: { label: string; score: number }[] };
+        if (Array.isArray(data.labels) && data.labels.length > 0) {
+          return { model: data.model, labels: data.labels.slice(0, 4) };
+        }
       }
+    } catch {
+      // fallback to in-browser Hugging Face AST ONNX
     }
-  } catch {
-    // fallback to in-browser Hugging Face AST ONNX
   }
 
   if (rawSamples16k) {
-    return classifyAudioInBrowser(rawSamples16k, 3500);
+    return classifyAudioInBrowser(rawSamples16k, 1200);
   }
   return null;
 }

@@ -26,6 +26,12 @@ function freqToNote(freq: number): string {
   return `${NOTE_NAMES[((n % 12) + 12) % 12]}${Math.floor(n / 12) - 1}`;
 }
 
+function getInstantAcousticLabel(hz: number, q: number): string {
+  if (q >= 65) return hz >= 650 ? "High-Q Metallic / Crystal Resonance" : "Resonant Rigid Plate Impulse";
+  if (q >= 30) return hz >= 550 ? "Crisp PCB / Composite Tap" : "Mid-Q Structural Panel Knock";
+  return "Damped / Polymer Knock";
+}
+
 type Phase = "idle" | "listening" | "analyzing" | "done" | "failed";
 
 export default function FindItsNotePage() {
@@ -197,35 +203,34 @@ export default function FindItsNotePage() {
         return;
       }
 
-      setPhase("analyzing");
-      setMessage("Computing median FFT & Hugging Face AST classification…");
-
       const finalHz = Math.round(median(capturedFreqs) * 10) / 10;
       const finalQ = Math.round(median(capturedQs));
       const finalSnr = Math.round(median(capturedSnrs));
-
-      let topAst: string | null = null;
-      if (bestAudioSample) {
-        const samples16k = resampleTo16k(bestAudioSample, sampleRate);
-        const wav = encodeWav(samples16k, 16000);
-        const hfRes = await classifyTapHF(wav, samples16k);
-        if (hfRes && hfRes.labels.length > 0) {
-          const top = hfRes.labels[0];
-          topAst = `${top.label} (${Math.round(top.score * 100)}%)`;
-          setAstLabel(topAst);
-        }
-      }
+      const instantLabel = getInstantAcousticLabel(finalHz, finalQ);
 
       setResultHz(finalHz);
       setResultQ(finalQ);
       setSnrDb(finalSnr);
-      saveResult(finalHz, finalQ, topAst);
+      setAstLabel(instantLabel);
+      saveResult(finalHz, finalQ, instantLabel);
       setPhase("done");
       setMessage("");
       void speak(
         `Detected ${freqToNote(finalHz)} at ${Math.round(finalHz)} hertz.`,
         { interrupt: false }
       );
+
+      if (bestAudioSample) {
+        const samples16k = resampleTo16k(bestAudioSample, sampleRate);
+        const wav = encodeWav(samples16k, 16000);
+        void classifyTapHF(wav, samples16k).then((hfRes) => {
+          if (cancelRef.current || !hfRes || hfRes.labels.length === 0) return;
+          const top = hfRes.labels[0];
+          const topAst = `${top.label} (${Math.round(top.score * 100)}%)`;
+          setAstLabel(topAst);
+          saveResult(finalHz, finalQ, topAst);
+        });
+      }
     } catch {
       if (autopilotRef.current) {
         useEstimate();

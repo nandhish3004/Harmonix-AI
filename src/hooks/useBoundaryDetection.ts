@@ -8,6 +8,15 @@ export interface Point2D {
   label?: string;
 }
 
+export interface TrackState {
+  cx: number;
+  cy: number;
+  r: number;
+  g: number;
+  b: number;
+  rad: number;
+}
+
 export interface BoundaryDetectionState {
   polygonCoords: Point2D[];
   isLocked: boolean;
@@ -79,19 +88,20 @@ export function detectQuadFromSource(
   targetWidth: number,
   targetHeight: number,
   overlayCanvas: HTMLCanvasElement | null,
-  workCanvas: HTMLCanvasElement
-): { corners: Point2D[] | null; confidence: number } {
+  workCanvas: HTMLCanvasElement,
+  prevTrack: TrackState | null = null
+): { corners: Point2D[] | null; confidence: number; track: TrackState | null } {
   if (srcWidth === 0 || srcHeight === 0 || targetWidth === 0 || targetHeight === 0) {
-    return { corners: null, confidence: 0 };
+    return { corners: null, confidence: 0, track: null };
   }
 
-  // Processing resolution for fast real-time CV
-  const procW = 200;
-  const procH = Math.max(120, Math.round((targetHeight / targetWidth) * procW));
+  // GPU downsampled processing resolution for <2ms real-time CV
+  const procW = 144;
+  const procH = Math.max(96, Math.round((targetHeight / targetWidth) * procW));
   workCanvas.width = procW;
   workCanvas.height = procH;
   const ctx = workCanvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return { corners: null, confidence: 0 };
+  if (!ctx) return { corners: null, confidence: 0, track: null };
 
   // Draw source with object-cover crop matching the viewport
   const srcRatio = srcWidth / srcHeight;
@@ -110,8 +120,9 @@ export function detectQuadFromSource(
   const data = imgData.data;
   const total = procW * procH;
 
-  // 1. Grayscale luminance + outer-border background color estimation
+  // 1. Grayscale luminance + outer-border background color + raw skin mask
   const gray = new Float32Array(total);
+  const rawSkinMask = new Uint8Array(total);
   let bgR = 0, bgG = 0, bgB = 0, bgCount = 0;
   for (let y = 0; y < procH; y++) {
     for (let x = 0; x < procW; x++) {
@@ -120,12 +131,27 @@ export function detectQuadFromSource(
       const r = data[idx];
       const g = data[idx + 1];
       const b = data[idx + 2];
-      gray[i] = 0.299 * r + 0.587 * g + 0.114 * b;
-      if (y < 6 || y >= procH - 6 || x < 6 || x >= procW - 6) {
+      const yLum = 0.299 * r + 0.587 * g + 0.114 * b;
+      gray[i] = yLum;
+      if (y < 5 || y >= procH - 5 || x < 5 || x >= procW - 5) {
         bgR += r;
         bgG += g;
         bgB += b;
         bgCount++;
+      }
+      const rgbSkin =
+        r > 95 &&
+        g > 40 &&
+        b > 20 &&
+        r > g &&
+        r - g > 15 &&
+        r - b > 15 &&
+        Math.abs(r - g) < 110;
+      const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+      const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+      const ycbcrSkin = yLum > 35 && cb >= 77 && cb <= 128 && cr >= 133 && cr <= 175 && r > g;
+      if (rgbSkin || ycbcrSkin) {
+        rawSkinMask[i] = 1;
       }
     }
   }
@@ -135,71 +161,47 @@ export function detectQuadFromSource(
     bgB /= bgCount;
   }
 
-  // 2. 5x5 Box-Blurred RGB Map + 3x3 Grayscale Blur + Combined RGB/YCbCr Skin Mask with 1px Dilation
+  // 2. Fast 5-tap cross-neighborhood smoothing kernel + 1px skin mask dilation
   const blurR = new Float32Array(total);
   const blurG = new Float32Array(total);
   const blurB = new Float32Array(total);
   const blurred = new Float32Array(total);
-  const rawSkinMask = new Uint8Array(total);
   const skinMask = new Uint8Array(total);
 
   for (let y = 0; y < procH; y++) {
-    for (let x = 0; x < procW; x++) {
-      const i = y * procW + x;
-      const dIdx = i * 4;
-      const r = data[dIdx];
-      const g = data[dIdx + 1];
-      const b = data[dIdx + 2];
-      const rgbSkin =
-        r > 95 &&
-        g > 40 &&
-        b > 20 &&
-        r > g &&
-        r - g > 15 &&
-        r - b > 15 &&
-        Math.abs(r - g) < 110;
-      const yLum = gray[i];
-      const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
-      const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-      const ycbcrSkin = yLum > 35 && cb >= 77 && cb <= 128 && cr >= 133 && cr <= 175 && r > g;
-      if (rgbSkin || ycbcrSkin) {
-        rawSkinMask[i] = 1;
-      }
+    const yUp = y > 0 ? y - 1 : 0;
+    const yDn = y < procH - 1 ? y + 1 : procH - 1;
+    const rowOff = y * procW;
+    const upOff = yUp * procW;
+    const dnOff = yDn * procW;
 
-      const x0 = Math.max(0, x - 2);
-      const x1 = Math.min(procW - 1, x + 2);
-      const y0 = Math.max(0, y - 2);
-      const y1 = Math.min(procH - 1, y + 2);
-      let sr = 0, sg = 0, sb = 0, sgray = 0, cnt = 0;
-      for (let yy = y0; yy <= y1; yy++) {
-        for (let xx = x0; xx <= x1; xx++) {
-          const j = yy * procW + xx;
-          const p = j * 4;
-          sr += data[p];
-          sg += data[p + 1];
-          sb += data[p + 2];
-          sgray += gray[j];
-          cnt++;
-        }
-      }
-      blurR[i] = sr / cnt;
-      blurG[i] = sg / cnt;
-      blurB[i] = sb / cnt;
-      blurred[i] = sgray / cnt;
-    }
-  }
-
-  for (let y = 0; y < procH; y++) {
     for (let x = 0; x < procW; x++) {
-      const i = y * procW + x;
-      if (!rawSkinMask[i]) continue;
-      for (let dy = -1; dy <= 1; dy++) {
-        const ny = y + dy;
-        if (ny < 0 || ny >= procH) continue;
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx;
-          if (nx >= 0 && nx < procW) {
-            skinMask[ny * procW + nx] = 1;
+      const i = rowOff + x;
+      const iL = rowOff + (x > 0 ? x - 1 : 0);
+      const iR = rowOff + (x < procW - 1 ? x + 1 : procW - 1);
+      const iT = upOff + x;
+      const iB = dnOff + x;
+
+      const pC = i * 4;
+      const pL = iL * 4;
+      const pR = iR * 4;
+      const pT = iT * 4;
+      const pB = iB * 4;
+
+      blurR[i] = (data[pC] * 2 + data[pL] + data[pR] + data[pT] + data[pB]) / 6;
+      blurG[i] = (data[pC + 1] * 2 + data[pL + 1] + data[pR + 1] + data[pT + 1] + data[pB + 1]) / 6;
+      blurB[i] = (data[pC + 2] * 2 + data[pL + 2] + data[pR + 2] + data[pT + 2] + data[pB + 2]) / 6;
+      blurred[i] = (gray[i] * 2 + gray[iL] + gray[iR] + gray[iT] + gray[iB]) / 6;
+
+      if (rawSkinMask[i]) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= procH) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx;
+            if (nx >= 0 && nx < procW) {
+              skinMask[ny * procW + nx] = 1;
+            }
           }
         }
       }
@@ -230,8 +232,19 @@ export function detectQuadFromSource(
   const meanMag = sumMag / total;
   const edgeBarrier = Math.max(95, meanMag * 3.1);
 
-  // 4. Multi-Seed Region Growing across 42 interior seed points
+  // 4. Priority temporal seeding from prevTrack + 42 interior grid seeds
   const seedCoords: [number, number][] = [];
+  if (prevTrack) {
+    const tcx = Math.round(prevTrack.cx);
+    const tcy = Math.round(prevTrack.cy);
+    seedCoords.push(
+      [tcx, tcy],
+      [tcx - 6, tcy - 6],
+      [tcx + 6, tcy - 6],
+      [tcx - 6, tcy + 6],
+      [tcx + 6, tcy + 6]
+    );
+  }
   for (const u of [0.18, 0.3, 0.42, 0.5, 0.58, 0.7, 0.82]) {
     for (const v of [0.2, 0.32, 0.44, 0.56, 0.68, 0.8]) {
       seedCoords.push([Math.round(u * procW), Math.round(v * procH)]);
@@ -249,6 +262,7 @@ export function detectQuadFromSource(
   let bestProcCorners: { x: number; y: number }[] | null = null;
   let bestRegionPixels: number[] = [];
   let bestFillRatio = 0;
+  let bestTrack: TrackState | null = null;
 
   for (const [sx, sy] of seedCoords) {
     if (sx < margin || sx >= procW - margin || sy < margin || sy >= procH - margin) continue;
@@ -371,8 +385,18 @@ export function detectQuadFromSource(
       }
     }
 
-    const optCos = Math.cos(bestRad);
-    const optSin = Math.sin(bestRad);
+    const isTrackedMatch =
+      prevTrack !== null &&
+      Math.hypot(centroidX - prevTrack.cx, centroidY - prevTrack.cy) <= 0.22 * maxDist &&
+      Math.abs(sr - prevTrack.r) + Math.abs(sg - prevTrack.g) + Math.abs(sb - prevTrack.b) <= 48;
+
+    let smoothedRad = bestRad;
+    if (isTrackedMatch && prevTrack && Math.abs(bestRad - prevTrack.rad) < (12 * Math.PI) / 180) {
+      smoothedRad = 0.7 * prevTrack.rad + 0.3 * bestRad;
+    }
+
+    const optCos = Math.cos(smoothedRad);
+    const optSin = Math.sin(smoothedRad);
     const sampleStep = Math.max(1, Math.floor(areaCount / 1600));
     const uVals: number[] = [];
     const vVals: number[] = [];
@@ -422,12 +446,21 @@ export function detectQuadFromSource(
       centrality *
       (1 + Math.min(1.5, bgDiff / 80));
     if (bordersTouched === 1) score *= 0.2;
+    if (isTrackedMatch) score *= 2.2;
 
     if (score > bestScore) {
       bestScore = score;
       bestRegionPixels = regionPixels;
       bestFillRatio = Math.min(1, obbFillRatio);
       bestProcCorners = rawQuad;
+      bestTrack = {
+        cx: centroidX,
+        cy: centroidY,
+        r: sr,
+        g: sg,
+        b: sb,
+        rad: smoothedRad,
+      };
       const scaleX = targetWidth / procW;
       const scaleY = targetHeight / procH;
       bestCorners = rawQuad.map((pt, idx) => ({
@@ -472,11 +505,11 @@ export function detectQuadFromSource(
   }
 
   if (!bestCorners) {
-    return { corners: null, confidence: 28 };
+    return { corners: null, confidence: 28, track: null };
   }
 
   const confidence = Math.min(99, Math.round(68 + bestFillRatio * 30));
-  return { corners: bestCorners, confidence };
+  return { corners: bestCorners, confidence, track: bestTrack };
 }
 
 export function useBoundaryDetection(): BoundaryDetectionState {
@@ -500,6 +533,11 @@ export function useBoundaryDetection(): BoundaryDetectionState {
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const latestCornersRef = useRef<Point2D[]>(DEFAULT_CORNERS);
+  const trackStateRef = useRef<TrackState | null>(null);
+  const targetCornersRef = useRef<Point2D[]>(DEFAULT_CORNERS);
+  const smoothCornersRef = useRef<{ x: number; y: number }[]>(
+    DEFAULT_CORNERS.map((p) => ({ x: p.x, y: p.y }))
+  );
 
   const isLockedRef = useRef(isLocked);
   const isAutoTrackingRef = useRef(isAutoTracking);
@@ -528,6 +566,12 @@ export function useBoundaryDetection(): BoundaryDetectionState {
       const next = [...prev];
       if (next[index]) {
         next[index] = { ...next[index], x, y };
+        if (smoothCornersRef.current[index]) {
+          smoothCornersRef.current[index] = { x, y };
+        }
+        if (targetCornersRef.current[index]) {
+          targetCornersRef.current[index] = { ...targetCornersRef.current[index], x, y };
+        }
       }
       latestCornersRef.current = next;
       return next;
@@ -542,6 +586,8 @@ export function useBoundaryDetection(): BoundaryDetectionState {
       label: c.label ?? `P${idx + 1}`,
     }));
     latestCornersRef.current = labeled;
+    targetCornersRef.current = labeled;
+    smoothCornersRef.current = labeled.map((c) => ({ x: c.x, y: c.y }));
     setPolygonCoords(labeled);
   }, []);
 
@@ -564,7 +610,10 @@ export function useBoundaryDetection(): BoundaryDetectionState {
   }, []);
 
   const resetDefaultBoundary = useCallback(() => {
+    trackStateRef.current = null;
     latestCornersRef.current = DEFAULT_CORNERS;
+    targetCornersRef.current = DEFAULT_CORNERS;
+    smoothCornersRef.current = DEFAULT_CORNERS.map((p) => ({ x: p.x, y: p.y }));
     setPolygonCoords(DEFAULT_CORNERS);
     setIsLocked(false);
   }, []);
@@ -577,7 +626,11 @@ export function useBoundaryDetection(): BoundaryDetectionState {
     const targetW = rect.width || 360;
     const targetH = rect.height || 380;
 
-    let result: { corners: Point2D[] | null; confidence: number } = { corners: null, confidence: 0 };
+    let result: { corners: Point2D[] | null; confidence: number; track: TrackState | null } = {
+      corners: null,
+      confidence: 0,
+      track: null,
+    };
 
     if (uploadedImgRef.current && uploadedImgRef.current.complete) {
       result = detectQuadFromSource(
@@ -587,7 +640,8 @@ export function useBoundaryDetection(): BoundaryDetectionState {
         targetW,
         targetH,
         overlayCanvasRef.current,
-        workCanvas
+        workCanvas,
+        trackStateRef.current
       );
     } else if (videoRef.current && videoRef.current.readyState >= 2) {
       result = detectQuadFromSource(
@@ -597,13 +651,17 @@ export function useBoundaryDetection(): BoundaryDetectionState {
         targetW,
         targetH,
         overlayCanvasRef.current,
-        workCanvas
+        workCanvas,
+        trackStateRef.current
       );
     }
 
     setEdgeConfidence(result.confidence);
+    if (result.track) trackStateRef.current = result.track;
     if (result.corners) {
       latestCornersRef.current = result.corners;
+      targetCornersRef.current = result.corners;
+      smoothCornersRef.current = result.corners.map((c) => ({ x: c.x, y: c.y }));
       setPolygonCoords(result.corners);
       return true;
     }
@@ -612,6 +670,7 @@ export function useBoundaryDetection(): BoundaryDetectionState {
 
   const processImageFile = useCallback(
     (file: File) => {
+      trackStateRef.current = null;
       const url = URL.createObjectURL(file);
       setUploadedImageUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
@@ -629,6 +688,7 @@ export function useBoundaryDetection(): BoundaryDetectionState {
   );
 
   const clearUploadedImage = useCallback(() => {
+    trackStateRef.current = null;
     uploadedImgRef.current = null;
     setUploadedImageUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
@@ -676,45 +736,67 @@ export function useBoundaryDetection(): BoundaryDetectionState {
       let frameTick = 0;
       const loop = () => {
         frameTick++;
-        // Run CV at ~15 Hz to keep UI smooth
-        if (
-          frameTick % 4 === 0 &&
+        const trackingActive =
           !isLockedRef.current &&
           isAutoTrackingRef.current &&
           videoRef.current &&
           videoRef.current.readyState >= 2 &&
-          !uploadedImgRef.current
-        ) {
+          !uploadedImgRef.current;
+
+        // Run fast region-growing OBB detector at 20 Hz (every 3rd frame)
+        if (frameTick % 3 === 0 && trackingActive && videoRef.current) {
           const workCanvas = getWorkCanvas();
           const container = containerRef.current;
           if (workCanvas && container) {
             const rect = container.getBoundingClientRect();
-            const { corners, confidence } = detectQuadFromSource(
+            const res = detectQuadFromSource(
               videoRef.current,
               videoRef.current.videoWidth,
               videoRef.current.videoHeight,
               rect.width || 360,
               rect.height || 380,
               overlayCanvasRef.current,
-              workCanvas
+              workCanvas,
+              trackStateRef.current
             );
-            setEdgeConfidence(confidence);
-            if (corners) {
-              // Adaptive One-Euro style velocity smoothing
-              setPolygonCoords((prev) =>
-                prev.map((p, idx) => {
-                  const delta = Math.hypot(corners[idx].x - p.x, corners[idx].y - p.y);
-                  const alpha = delta < 5 ? 0.1 : delta < 16 ? 0.25 : 0.5;
-                  return {
-                    ...p,
-                    x: Math.round(p.x * (1 - alpha) + corners[idx].x * alpha),
-                    y: Math.round(p.y * (1 - alpha) + corners[idx].y * alpha),
-                  };
-                })
-              );
+            trackStateRef.current = res.track;
+            setEdgeConfidence(res.confidence);
+            if (res.corners) {
+              targetCornersRef.current = res.corners;
             }
           }
         }
+
+        // True 60 FPS pin interpolation with deadband for zero jitter when steady
+        if (trackingActive && targetCornersRef.current.length === 4) {
+          const cur = smoothCornersRef.current;
+          const tgt = targetCornersRef.current;
+          const prev = latestCornersRef.current;
+          let changed = false;
+          const nextCoords: Point2D[] = new Array(4);
+
+          for (let idx = 0; idx < 4; idx++) {
+            const dx = tgt[idx].x - cur[idx].x;
+            const dy = tgt[idx].y - cur[idx].y;
+            const dist = Math.hypot(dx, dy);
+            if (dist >= 1.2) {
+              cur[idx].x += dx * 0.28;
+              cur[idx].y += dy * 0.28;
+            }
+            const rx = Math.round(cur[idx].x);
+            const ry = Math.round(cur[idx].y);
+            if (!prev[idx] || Math.abs(rx - prev[idx].x) >= 1 || Math.abs(ry - prev[idx].y) >= 1) {
+              changed = true;
+            }
+            nextCoords[idx] = { x: rx, y: ry, label: tgt[idx].label ?? `P${idx + 1}` };
+          }
+
+          if (changed) {
+            latestCornersRef.current = nextCoords;
+            setPolygonCoords(nextCoords);
+          }
+        }
+
         animFrameRef.current = requestAnimationFrame(loop);
       };
       animFrameRef.current = requestAnimationFrame(loop);

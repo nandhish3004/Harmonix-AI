@@ -221,12 +221,12 @@ export default function WorkpieceScanPage() {
         setScanMessage("Snapped P1–P4 to workpiece contour. Identifying with Hugging Face…");
       }
 
-      // Step B: Fast Hugging Face detection on full frame + CLIP classification on cropped P1–P4 ROI
+      // Step B: Fast Hugging Face MobileViT + Spectral CV classification on <=224px cropped ROI
       if (containerRef.current && (cameraActive || uploadedImageUrl)) {
         const rect = containerRef.current.getBoundingClientRect();
         const cw = Math.round(rect.width) || 360;
         const ch = Math.round(rect.height) || 380;
-        const S = 2;
+        const S = 1;
         const snap = document.createElement("canvas");
         snap.width = cw * S;
         snap.height = ch * S;
@@ -265,7 +265,7 @@ export default function WorkpieceScanPage() {
               sy = (sh - cropH) / 2;
             }
             sCtx.drawImage(src, sx, sy, cropW, cropH, 0, 0, cw * S, ch * S);
-            const fullBlob = await new Promise<Blob | null>((r) => snap.toBlob(r, "image/jpeg", 0.85));
+            const fullBlob = await new Promise<Blob | null>((r) => snap.toBlob(r, "image/jpeg", 0.8));
 
             let cropBlob: Blob | undefined;
             if (snappedCorners && snappedCorners.length === 4) {
@@ -283,15 +283,18 @@ export default function WorkpieceScanPage() {
               const ry = Math.max(0, Math.round((minY - padY) * S));
               const rw = Math.min(cw * S - rx, Math.round((bw + 2 * padX) * S));
               const rh = Math.min(ch * S - ry, Math.round((bh + 2 * padY) * S));
-              if (rw > 24 && rh > 24) {
+              if (rw > 20 && rh > 20) {
+                const roiScale = Math.min(1, 224 / Math.max(rw, rh));
+                const dstW = Math.min(224, Math.max(24, Math.round(rw * roiScale)));
+                const dstH = Math.min(224, Math.max(24, Math.round(rh * roiScale)));
                 const cropCanvas = document.createElement("canvas");
-                cropCanvas.width = rw;
-                cropCanvas.height = rh;
+                cropCanvas.width = dstW;
+                cropCanvas.height = dstH;
                 const cropCtx = cropCanvas.getContext("2d");
                 if (cropCtx) {
-                  cropCtx.drawImage(snap, rx, ry, rw, rh, 0, 0, rw, rh);
+                  cropCtx.drawImage(snap, rx, ry, rw, rh, 0, 0, dstW, dstH);
                   const roi = await new Promise<Blob | null>((r) =>
-                    cropCanvas.toBlob(r, "image/jpeg", 0.88)
+                    cropCanvas.toBlob(r, "image/jpeg", 0.82)
                   );
                   if (roi) cropBlob = roi;
                 }
