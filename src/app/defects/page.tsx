@@ -16,7 +16,8 @@ export default function DefectAnalysisPage() {
 
   const [guideOpen, setGuideOpen] = useState<boolean>(true);
   const [baselineHz, setBaselineHz] = useState<number>(740);
-  const [actualHz, setActualHz] = useState<number>(702);
+  const [actualHz, setActualHz] = useState<number>(740);
+  const [isMeasuredSource, setIsMeasuredSource] = useState<boolean>(false);
   const [plateAreaMm2, setPlateAreaMm2] = useState<number>(14250);
 
   useEffect(() => {
@@ -27,12 +28,15 @@ export default function DefectAnalysisPage() {
     if (typeof window !== "undefined") {
       const savedBase = Number(localStorage.getItem("harmonix_peak_freq"));
       const base = Number.isFinite(savedBase) && savedBase > 50 ? savedBase : mode.freqHz;
+      const srcType = localStorage.getItem("harmonix_freq_source");
       const meas = Number(localStorage.getItem("harmonix_measured_freq"));
       setBaselineHz(base);
-      if (Number.isFinite(meas) && meas > 50) {
+      if (srcType === "measured" && Number.isFinite(meas) && meas > 50) {
         setActualHz(meas);
+        setIsMeasuredSource(true);
       } else {
-        setActualHz(Math.max(50, base - 38));
+        setActualHz(base);
+        setIsMeasuredSource(false);
       }
     }
   }, []);
@@ -113,9 +117,15 @@ export default function DefectAnalysisPage() {
             }`}
           >
             {defectDetected
-              ? `Frequency shift (${deltaHz >= 0 ? `+${deltaHz}` : deltaHz} Hz) exceeds ±15 Hz NDT threshold. Asymmetrical nodal distortion detected in Quadrant Q2.`
-              : `Measured resonance (${actualHz} Hz) aligns with golden baseline (${baselineHz} Hz) within ±15 Hz NDT tolerance.`}
+              ? `Frequency shift (${deltaHz >= 0 ? `+${deltaHz}` : deltaHz} Hz) exceeds ±15 Hz NDT threshold. Asymmetrical nodal distortion flagged.`
+              : isMeasuredSource
+              ? `Measured tap resonance (${actualHz} Hz) aligns with baseline (${baselineHz} Hz) within ±15 Hz NDT tolerance.`
+              : `No physical tap deviation measured yet — showing theoretical baseline (${baselineHz} Hz). Move the slider below to simulate a structural void.`}
           </p>
+
+          <div className="flex items-center justify-between text-[10px] font-mono text-slate-600 dark:text-[#8C999A]">
+            <span>SOURCE: {isMeasuredSource ? "EMPIRICAL MIC TAP" : "THEORETICAL BASELINE (SIMULATION READY)"}</span>
+          </div>
 
           <div className="grid grid-cols-2 gap-2 pt-1 text-[11px] font-mono">
             <div className="bg-white/80 dark:bg-[#101F23]/80 p-2 rounded border border-slate-200 dark:border-[#294044]">

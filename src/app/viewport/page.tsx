@@ -25,6 +25,7 @@ import { speak } from "@/utils/voice";
 import {
   chladniAmplitude,
   computeAllModes,
+  ComputedHarmonicMode,
   frequencyToMode,
   computeHomography,
   applyHomography,
@@ -59,15 +60,19 @@ export default function ChladniViewportPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscRef = useRef<OscillatorNode | null>(null);
-  const autoRanRef = useRef<boolean>(false);
+  const orbitYawRef = useRef<number>(0.45);
+  const orbitPitchRef = useRef<number>(0.62);
+  const userOrbitedRef = useRef<boolean>(false);
+  const dragStartRef = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
 
   const [frequency, setFrequency] = useState<number>(740);
   const [viewMode, setViewMode] = useState<ViewMode>("ar");
   const [cameraActive, setCameraActive] = useState<boolean>(false);
+  const [arTargetVisible, setArTargetVisible] = useState<boolean>(false);
+  const [freqSource, setFreqSource] = useState<"theoretical" | "measured">("theoretical");
   const [isAudioOn, setIsAudioOn] = useState<boolean>(false);
-  const [isFinding, setIsFinding] = useState<boolean>(false);
+  const [isSolving, setIsSolving] = useState<boolean>(false);
   const [guideOpen, setGuideOpen] = useState<boolean>(true);
-  const [sweepDone, setSweepDone] = useState<boolean>(false);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
   const [showFineTune, setShowFineTune] = useState<boolean>(false);
   const [material, setMaterial] = useState<MaterialData>(DEFAULT_MATERIAL);
@@ -76,6 +81,7 @@ export default function ChladniViewportPage() {
     areaMm2: 14250,
     aspectRatio: 1.2,
   });
+  const [allModes, setAllModes] = useState<ComputedHarmonicMode[]>([]);
   const [quad, setQuad] = useState<Point2D[]>(DEFAULT_QUAD);
   const [loaded, setLoaded] = useState<boolean>(false);
 
@@ -93,14 +99,32 @@ export default function ChladniViewportPage() {
     activeMode.n
   );
 
-  // Load stored scan / material
+  // Load stored scan / material / theoretical vs measured frequency source
   useEffect(() => {
-    setMaterial(getStoredMaterial());
-    setThicknessMm(getStoredThickness());
-    setPlateGeo(getStoredPlateGeometry());
+    const mat = getStoredMaterial();
+    const thick = getStoredThickness();
+    const geo = getStoredPlateGeometry();
+    setMaterial(mat);
+    setThicknessMm(thick);
+    setPlateGeo(geo);
+    const computed = computeAllModes(mat, thick, geo.areaMm2, geo.aspectRatio, 0);
+    setAllModes(computed);
+    const defaultMode = computed.find((m) => m.id === "mode-2-2") ?? computed[2] ?? computed[0];
+
     if (typeof window !== "undefined") {
-      const savedFreq = Number(localStorage.getItem("harmonix_peak_freq"));
-      if (Number.isFinite(savedFreq) && savedFreq >= 200) setFrequency(savedFreq);
+      const srcType = localStorage.getItem("harmonix_freq_source");
+      const measFreq = Number(localStorage.getItem("harmonix_measured_freq"));
+      const savedPeak = Number(localStorage.getItem("harmonix_peak_freq"));
+      if (srcType === "measured" && Number.isFinite(measFreq) && measFreq >= 80) {
+        setFrequency(Math.round(measFreq));
+        setFreqSource("measured");
+      } else if (Number.isFinite(savedPeak) && savedPeak >= 80) {
+        setFrequency(Math.round(savedPeak));
+        setFreqSource("theoretical");
+      } else if (defaultMode) {
+        setFrequency(defaultMode.freqHz);
+        setFreqSource("theoretical");
+      }
       try {
         const bNorm = localStorage.getItem("harmonix_boundary_norm");
         if (bNorm) {
@@ -134,12 +158,10 @@ export default function ChladniViewportPage() {
     setLoaded(true);
   }, []);
 
-  // AI: sweep the spectrum and lock onto the board's natural resonance automatically
-  const findResonance = useCallback(() => {
-    if (isFinding) return;
-    setIsFinding(true);
-    setAiMessage("AI is sweeping frequencies to find your board's natural pitch…");
-
+  // Honest Theoretical Eigenfrequency Solver + Live Acoustic Excitation Sweep
+  const runEigenSolverAndSweep = useCallback(() => {
+    if (isSolving || !loaded) return;
+    setIsSolving(true);
     const modes = computeAllModes(
       material,
       thicknessMm,
@@ -147,43 +169,48 @@ export default function ChladniViewportPage() {
       plateGeo.aspectRatio,
       0
     );
-    const target = modes.find((m) => m.id === "mode-2-2") ?? modes[2];
-    const start = 200;
-    const end = Math.max(220, Math.min(2500, target.freqHz));
-    const steps = 46;
-    let i = 0;
+    setAllModes(modes);
+    const target = modes.find((m) => m.m === activeMode.m && m.n === activeMode.n) ?? modes[2] ?? modes[0];
+    const solvedHz = Math.max(100, Math.min(3500, target.freqHz));
+    setFrequency(solvedHz);
+    setFreqSource("theoretical");
+    if (typeof window !== "undefined") {
+      localStorage.setItem("harmonix_peak_freq", String(solvedHz));
+    }
 
-    const timer = setInterval(() => {
-      i++;
-      const t = i / steps;
-      const eased = 1 - Math.pow(1 - t, 3);
-      // Wobble past the peak slightly then settle: feels like a real search
-      const wobble = Math.sin(t * Math.PI * 4) * (1 - t) * 60;
-      setFrequency(Math.round(start + (end - start) * eased + wobble));
-      if (i >= steps) {
-        clearInterval(timer);
-        setFrequency(Math.round(end));
-        setIsFinding(false);
-        setSweepDone(true);
-        setAiMessage(
-          `Locked! Your board resonates at ${Math.round(end)} Hz — watch the colors light up.`
-        );
-        void speak(`Resonance locked at ${Math.round(end)} hertz.`, { interrupt: false });
-        setTimeout(() => setAiMessage(null), 5000);
+    // Play brief live excitation tone sweep into speaker if audio context allowed
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx) {
+        const ac = new AudioCtx();
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(Math.max(120, solvedHz * 0.72), ac.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(solvedHz, ac.currentTime + 0.55);
+        g.gain.setValueAtTime(0.01, ac.currentTime);
+        g.gain.linearRampToValueAtTime(0.18, ac.currentTime + 0.12);
+        g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.75);
+        osc.connect(g);
+        g.connect(ac.destination);
+        osc.start();
+        osc.stop(ac.currentTime + 0.78);
+        setTimeout(() => ac.close().catch(() => {}), 900);
       }
-    }, 55);
-  }, [isFinding, material, thicknessMm, plateGeo]);
+    } catch {
+      // speaker excitation optional
+    }
 
-  // Auto-run once guide closes so users see magic without touching anything
-  useEffect(() => {
-    if (!loaded || guideOpen || autoRanRef.current) return;
-    autoRanRef.current = true;
-    const t = setTimeout(() => findResonance(), 600);
-    return () => clearTimeout(t);
-  }, [loaded, guideOpen, findResonance]);
+    setAiMessage(
+      `Kirchhoff-Love FEA Mode ${target.indices}: ${solvedHz} Hz (theoretical baseline). Next screen measures actual board pitch with your mic.`
+    );
+    void speak(`Calculated mode frequency ${solvedHz} hertz.`, { interrupt: false });
+    setTimeout(() => setIsSolving(false), 750);
+  }, [isSolving, loaded, material, thicknessMm, plateGeo, activeMode.m, activeMode.n]);
 
-  // Autopilot: move to Pitch Tuner after sweep completes
-  useAutoAdvance(sweepDone && !guideOpen && !isFinding, 2800, () => router.push("/tuner"));
+  useAutoAdvance(false, 2800, () => router.push("/tuner"));
 
   // Live camera pass-through for AR
   useEffect(() => {
@@ -266,15 +293,22 @@ export default function ChladniViewportPage() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    if (viewMode === "ar") setArTargetVisible(false);
+
     let raf = 0;
     let phase = 0;
     let frameTick = 0;
+    let targetVisible = false;
+    let missStreak = 0;
+    let prevTrackState = null as ReturnType<typeof detectQuadFromSource>["track"];
     const cols = viewMode === "ar" ? 20 : 26;
     const rows = cols;
     const evalAmp = (nx: number, ny: number) =>
       chladniAmplitude(nx, ny, activeMode.m, activeMode.n);
     let trackedQuad: Point2D[] = quad.map((p) => ({ ...p }));
     const workCanvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
+    const normW = plateGeo.aspectRatio >= 1 ? 1.0 : Math.max(0.45, plateGeo.aspectRatio);
+    const normH = plateGeo.aspectRatio >= 1 ? Math.max(0.45, 1.0 / plateGeo.aspectRatio) : 1.0;
     const gainScale = Math.min(2.2, 0.55 + activeMode.resonanceGain * 0.14);
     const sparkles = Array.from({ length: 26 }, () => ({
       u: Math.random(),
@@ -283,15 +317,15 @@ export default function ChladniViewportPage() {
       o: Math.random() * 6.28,
     }));
 
-    type P = { sx: number; sy: number; amp: number; depth: number };
+    type P = { sx: number; sy: number; amp: number; w: number; depth: number };
 
     const draw = () => {
       phase += 0.12;
       frameTick++;
 
-      // Live camera CV quad tracking every 6 frames with EMA smoothing
+      // Live camera CV quad verification on AR frames (never hallucinate without camera lock)
       if (
-        frameTick % 6 === 0 &&
+        (frameTick === 1 || frameTick % 4 === 0) &&
         viewMode === "ar" &&
         cameraActive &&
         videoRef.current &&
@@ -305,24 +339,97 @@ export default function ChladniViewportPage() {
           360,
           360,
           null,
-          workCanvas
+          workCanvas,
+          prevTrackState
         );
-        if (res.corners && res.corners.length === 4 && res.confidence >= 45) {
-          trackedQuad = trackedQuad.map((p, idx) => {
-            const delta = Math.hypot(res.corners![idx].x - p.x, res.corners![idx].y - p.y);
-            const alpha = delta < 5 ? 0.1 : 0.24;
-            return {
-              x: p.x * (1 - alpha) + res.corners![idx].x * alpha,
-              y: p.y * (1 - alpha) + res.corners![idx].y * alpha,
-            };
-          });
+        prevTrackState = res.track;
+        if (res.corners && res.corners.length === 4 && res.confidence >= 65) {
+          missStreak = 0;
+          if (!targetVisible) {
+            targetVisible = true;
+            setArTargetVisible(true);
+            trackedQuad = res.corners.map((p) => ({ x: p.x, y: p.y }));
+          } else {
+            trackedQuad = trackedQuad.map((p, idx) => {
+              const delta = Math.hypot(res.corners![idx].x - p.x, res.corners![idx].y - p.y);
+              const alpha = delta < 1.5 ? 0 : delta < 6 ? 0.18 : 0.32;
+              return {
+                x: p.x * (1 - alpha) + res.corners![idx].x * alpha,
+                y: p.y * (1 - alpha) + res.corners![idx].y * alpha,
+              };
+            });
+          }
+        } else {
+          missStreak++;
+          if (missStreak >= 3 && targetVisible) {
+            targetVisible = false;
+            setArTargetVisible(false);
+          }
         }
       }
 
-      const H = computeHomography(trackedQuad);
-
       ctx.globalCompositeOperation = "source-over";
       ctx.clearRect(0, 0, 360, 360);
+
+      // In AR mode without a confirmed workpiece in camera view, draw clean engineering target reticle only
+      if (viewMode === "ar" && !targetVisible) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(34, 211, 238, 0.72)";
+        ctx.lineWidth = 2;
+        const bx0 = 64, by0 = 72, bx1 = 296, by1 = 288, br = 22;
+        const corners = [
+          [bx0, by0, 1, 1],
+          [bx1, by0, -1, 1],
+          [bx1, by1, -1, -1],
+          [bx0, by1, 1, -1],
+        ];
+        corners.forEach(([cx, cy, dx, dy]) => {
+          ctx.beginPath();
+          ctx.moveTo(cx, cy + dy * br);
+          ctx.lineTo(cx, cy);
+          ctx.lineTo(cx + dx * br, cy);
+          ctx.stroke();
+        });
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = "rgba(148, 163, 184, 0.45)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx0, by0, bx1 - bx0, by1 - by0);
+        ctx.setLineDash([]);
+
+        ctx.beginPath();
+        ctx.moveTo(170, 180);
+        ctx.lineTo(190, 180);
+        ctx.moveTo(180, 170);
+        ctx.lineTo(180, 190);
+        ctx.strokeStyle = "rgba(34, 211, 238, 0.85)";
+        ctx.stroke();
+
+        ctx.fillStyle = "rgba(13, 25, 28, 0.84)";
+        ctx.beginPath();
+        ctx.roundRect(38, 162, 284, 44, 10);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(34, 211, 238, 0.5)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = "#67E8F9";
+        ctx.font = "bold 10px JetBrains Mono, monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(
+          cameraActive ? "NO WORKPIECE IN CAMERA VIEW" : "CAMERA OFF FOR LIVE AR",
+          180,
+          181
+        );
+        ctx.fillStyle = "#CBD5E1";
+        ctx.font = "9px Inter, sans-serif";
+        ctx.fillText("POINT CAMERA AT BOARD OR SWITCH TO 3D / 2D", 180, 197);
+        ctx.restore();
+
+        raf = requestAnimationFrame(draw);
+        return;
+      }
+
+      const H = computeHomography(trackedQuad);
 
       if (viewMode === "3d") {
         const g = ctx.createLinearGradient(0, 0, 360, 360);
@@ -340,9 +447,15 @@ export default function ChladniViewportPage() {
       }
 
       const osc = Math.sin(phase);
-      const spin = phase * 0.18;
-      const cosT = Math.cos(spin);
-      const sinT = Math.sin(spin);
+      if (viewMode === "3d" && !userOrbitedRef.current) {
+        orbitYawRef.current += 0.008;
+      }
+      const yaw = orbitYawRef.current;
+      const pitch = orbitPitchRef.current;
+      const cosY = Math.cos(yaw);
+      const sinY = Math.sin(yaw);
+      const cosP = Math.cos(pitch);
+      const sinP = Math.sin(pitch);
       const pts: P[][] = [];
 
       for (let r = 0; r <= rows; r++) {
@@ -351,20 +464,21 @@ export default function ChladniViewportPage() {
         for (let c = 0; c <= cols; c++) {
           const nx = c / cols;
           const w = evalAmp(nx, ny);
-          const z = w * osc * gainScale * (viewMode === "ar" ? 12 : 26);
+          const z = w * osc * gainScale * (viewMode === "ar" ? 12 : 24);
           if (viewMode === "ar") {
             const p = applyHomography(H, nx, ny);
-            rowArr.push({ sx: p.x, sy: p.y - z, amp: Math.abs(w), depth: 0 });
+            rowArr.push({ sx: p.x, sy: p.y - z, amp: Math.abs(w), w, depth: 0 });
           } else {
-            const cx = nx - 0.5;
-            const cy = ny - 0.5;
-            const rx = cx * cosT - cy * sinT;
-            const ry = cx * sinT + cy * cosT;
+            const cx = (nx - 0.5) * normW;
+            const cy = (ny - 0.5) * normH;
+            const rx = cx * cosY - cy * sinY;
+            const ry = cx * sinY + cy * cosY;
             rowArr.push({
-              sx: 180 + rx * 250,
-              sy: 205 + ry * 105 - z,
+              sx: 180 + rx * 230,
+              sy: 196 + ry * cosP * 205 - z * sinP,
               amp: Math.abs(w),
-              depth: ry,
+              w,
+              depth: ry * sinP,
             });
           }
         }
@@ -413,6 +527,34 @@ export default function ChladniViewportPage() {
             : "rgba(255,255,255,0.22)";
         ctx.lineWidth = viewMode === "ar" ? 0.9 : 0.6;
         ctx.stroke();
+
+        // Nodal zero-crossing contour lines on 3D surface
+        if (viewMode === "3d") {
+          const edges: [P, P][] = [
+            [q.a, q.b],
+            [q.b, q.c],
+            [q.c, q.d],
+            [q.d, q.a],
+          ];
+          const hits: { x: number; y: number }[] = [];
+          for (const [p0, p1] of edges) {
+            if ((p0.w <= 0 && p1.w > 0) || (p0.w >= 0 && p1.w < 0)) {
+              const t = Math.abs(p0.w) / (Math.abs(p0.w) + Math.abs(p1.w) + 1e-6);
+              hits.push({
+                x: p0.sx + (p1.sx - p0.sx) * t,
+                y: p0.sy + (p1.sy - p0.sy) * t,
+              });
+            }
+          }
+          if (hits.length >= 2) {
+            ctx.strokeStyle = "rgba(248, 250, 252, 0.85)";
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.moveTo(hits[0].x, hits[0].y);
+            ctx.lineTo(hits[1].x, hits[1].y);
+            ctx.stroke();
+          }
+        }
       }
 
       if (viewMode === "ar") {
@@ -508,7 +650,7 @@ export default function ChladniViewportPage() {
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [viewMode, cameraActive, activeMode.m, activeMode.n, activeMode.resonanceGain, quad]);
+  }, [viewMode, cameraActive, activeMode.m, activeMode.n, activeMode.resonanceGain, plateGeo.aspectRatio, quad]);
 
   const toggleAudioDrive = async () => {
     if (isAudioOn) {
@@ -559,16 +701,52 @@ export default function ChladniViewportPage() {
         step="SCREEN 04 // 10"
         backHref="/material"
         rightAction={
-          <HudBadge variant="teal" dot>
-            {viewMode === "ar" ? (cameraActive ? "LIVE AR" : "HOLOGRAM") : `${fps} FPS`}
+          <HudBadge variant={viewMode === "ar" && !arTargetVisible ? "warning" : "teal"} dot>
+            {viewMode === "ar"
+              ? !cameraActive
+                ? "CAMERA OFF"
+                : arTargetVisible
+                ? "AR LOCKED"
+                : "NO TARGET"
+              : `${fps} FPS`}
           </HudBadge>
         }
       />
 
       <div className="p-4 space-y-3 flex-1 flex flex-col">
         <TestGuide kind="ar" open={guideOpen} onDone={() => setGuideOpen(false)} />
-        {/* Main viewport — always dark glass so neon colors pop */}
-        <div className="relative w-full aspect-square rounded-3xl overflow-hidden bg-gradient-to-br from-[#0A1417] via-[#0D191C] to-[#15282C] shadow-xl shadow-sky-500/20 ring-1 ring-white/10 flex items-center justify-center">
+        {/* Main viewport — interactive pointer drag-to-orbit in 3D mode */}
+        <div
+          onPointerDown={(e) => {
+            if (viewMode !== "3d") return;
+            userOrbitedRef.current = true;
+            dragStartRef.current = {
+              x: e.clientX,
+              y: e.clientY,
+              yaw: orbitYawRef.current,
+              pitch: orbitPitchRef.current,
+            };
+          }}
+          onPointerMove={(e) => {
+            if (viewMode !== "3d" || !dragStartRef.current) return;
+            const dx = e.clientX - dragStartRef.current.x;
+            const dy = e.clientY - dragStartRef.current.y;
+            orbitYawRef.current = dragStartRef.current.yaw + dx * 0.012;
+            orbitPitchRef.current = Math.max(
+              0.2,
+              Math.min(1.35, dragStartRef.current.pitch + dy * 0.008)
+            );
+          }}
+          onPointerUp={() => {
+            dragStartRef.current = null;
+          }}
+          onPointerLeave={() => {
+            dragStartRef.current = null;
+          }}
+          className={`relative w-full aspect-square rounded-3xl overflow-hidden bg-gradient-to-br from-[#0A1417] via-[#0D191C] to-[#15282C] shadow-xl shadow-sky-500/20 ring-1 ring-white/10 flex items-center justify-center ${
+            viewMode === "3d" ? "cursor-grab active:cursor-grabbing touch-none" : ""
+          }`}
+        >
           {viewMode === "ar" && (
             <video
               ref={videoRef}
@@ -594,10 +772,12 @@ export default function ChladniViewportPage() {
 
           {/* Frequency pill */}
           <div className="absolute top-3 left-3 z-20 pointer-events-none">
-            <div className="bg-black/45 backdrop-blur-md px-3 py-1.5 rounded-2xl border border-white/15 flex items-center gap-2">
+            <div className="bg-black/55 backdrop-blur-md px-3 py-1.5 rounded-2xl border border-white/15 flex items-center gap-2">
               <Radio className="w-4 h-4 text-cyan-300 animate-pulse" />
               <div className="leading-tight">
-                <span className="text-[9px] text-white/70 block font-semibold">NATURAL PITCH</span>
+                <span className="text-[9px] text-white/75 block font-semibold">
+                  {freqSource === "measured" ? "MIC MEASURED" : "THEORETICAL FEA"}
+                </span>
                 <span className="text-sm font-extrabold text-white">{frequency} Hz</span>
               </div>
               <span className="ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sky-500/80 text-white">
@@ -605,6 +785,12 @@ export default function ChladniViewportPage() {
               </span>
             </div>
           </div>
+
+          {viewMode === "3d" && (
+            <div className="absolute top-3 right-3 z-20 pointer-events-none px-2 py-1 rounded-full bg-black/50 text-[9px] font-mono text-white/80">
+              DRAG TO ORBIT
+            </div>
+          )}
 
           {/* Hear it */}
           <button
@@ -624,6 +810,31 @@ export default function ChladniViewportPage() {
             {modeBtn("2d", "2D", Layers)}
           </div>
         </div>
+
+        {/* Canonical Mode Selection Pills */}
+        {allModes.length > 0 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            {allModes.map((m) => {
+              const selected = activeMode.m === m.m && activeMode.n === m.n;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => {
+                    setFrequency(m.freqHz);
+                    setFreqSource("theoretical");
+                  }}
+                  className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-mono font-bold border transition-colors ${
+                    selected
+                      ? "bg-sky-600 text-white border-sky-600 dark:bg-[#0EB29A] dark:text-[#0D191C] dark:border-[#0EB29A]"
+                      : "bg-white dark:bg-[#15282C] text-slate-600 dark:text-[#8C999A] border-slate-200 dark:border-[#294044]"
+                  }`}
+                >
+                  {m.indices} · {m.freqHz}Hz
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Color legend */}
         <div className="flex items-center gap-2 px-1">
@@ -645,17 +856,17 @@ export default function ChladniViewportPage() {
           </div>
         )}
 
-        {/* One big AI action */}
+        {/* Theoretical Solver + Acoustic Sweep CTA */}
         <HudButton
           variant="primary"
           size="lg"
           fullWidth
-          isLoading={isFinding}
-          onClick={findResonance}
+          isLoading={isSolving}
+          onClick={runEigenSolverAndSweep}
           className="flex items-center justify-center gap-2"
         >
           <Sparkles className="w-5 h-5" />
-          <span>AI Find Resonance</span>
+          <span>Solve Theoretical Mode & Excite</span>
         </HudButton>
 
         {/* Advanced (hidden by default) */}

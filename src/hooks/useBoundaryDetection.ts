@@ -504,6 +504,31 @@ export function detectQuadFromSource(
     const obbFillRatio = areaCount / obbBoxArea;
     if (obbFillRatio < 0.48) continue;
 
+    // Interior texture homogeneity check: reject noisy shirts/walls/hair (high RGB std dev)
+    let sumRReg = 0, sumGReg = 0, sumBReg = 0;
+    const statStep = Math.max(1, Math.floor(areaCount / 400));
+    let statCount = 0;
+    for (let k = 0; k < areaCount; k += statStep) {
+      const idx = regionPixels[k];
+      sumRReg += blurR[idx];
+      sumGReg += blurG[idx];
+      sumBReg += blurB[idx];
+      statCount++;
+    }
+    const meanRReg = sumRReg / Math.max(1, statCount);
+    const meanGReg = sumGReg / Math.max(1, statCount);
+    const meanBReg = sumBReg / Math.max(1, statCount);
+    let varSum = 0;
+    for (let k = 0; k < areaCount; k += statStep) {
+      const idx = regionPixels[k];
+      const dr = blurR[idx] - meanRReg;
+      const dg = blurG[idx] - meanGReg;
+      const db = blurB[idx] - meanBReg;
+      varSum += dr * dr + dg * dg + db * db;
+    }
+    const colorStd = Math.sqrt(varSum / Math.max(1, 3 * statCount));
+    if (colorStd > 42) continue;
+
     // 4-Side Directional Caliper Projection within +-6px band around u0, u1, v0, v1
     const snapCaliperU = (baseU: number): number => {
       let bestU = baseU;
@@ -572,16 +597,34 @@ export function detectQuadFromSource(
       backProject(u0Snap, v1Snap),
     ];
 
-    // Perimeter Edge-Support Verification along all 4 reconstructed edges
+    // Check interior skin fraction across core of reconstructed quad (ignore 12% edge rim where fingers hold)
+    let interiorSkinHits = 0;
+    const interiorGrid = 8;
+    for (let gy = 0; gy < interiorGrid; gy++) {
+      const vv = v0Snap + (0.14 + (gy / (interiorGrid - 1)) * 0.72) * (v1Snap - v0Snap);
+      for (let gx = 0; gx < interiorGrid; gx++) {
+        const uu = u0Snap + (0.14 + (gx / (interiorGrid - 1)) * 0.72) * (u1Snap - u0Snap);
+        const ix = Math.round(centroidX + uu * optCos - vv * optSin);
+        const iy = Math.round(centroidY + uu * optSin + vv * optCos);
+        if (ix >= 0 && ix < procW && iy >= 0 && iy < procH && skinMask[iy * procW + ix]) {
+          interiorSkinHits++;
+        }
+      }
+    }
+    if (interiorSkinHits / (interiorGrid * interiorGrid) > 0.08) continue;
+
+    // Per-Side & Perimeter Edge-Support Verification along all 4 reconstructed edges
     const edgeThreshold = meanMag * 1.15;
     let supportedSamples = 0;
     const samplesPerSide = 16;
+    const sideSupport = [0, 0, 0, 0];
     for (let side = 0; side < 4; side++) {
       const a = rawQuad[side];
       const b = rawQuad[(side + 1) % 4];
       const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
       const nx = -(b.y - a.y) / len;
       const ny = (b.x - a.x) / len;
+      let sideHits = 0;
       for (let s = 0; s < samplesPerSide; s++) {
         const t = 0.08 + (s / (samplesPerSide - 1)) * 0.84;
         const px = a.x + (b.x - a.x) * t;
@@ -591,11 +634,17 @@ export function detectQuadFromSource(
           sampleMag(px + nx, py + ny),
           sampleMag(px - nx, py - ny)
         );
-        if (peakEdge >= edgeThreshold) supportedSamples++;
+        if (peakEdge >= edgeThreshold) {
+          supportedSamples++;
+          sideHits++;
+        }
       }
+      sideSupport[side] = sideHits / samplesPerSide;
     }
     const edgeSupportRatio = supportedSamples / (4 * samplesPerSide);
-    if (edgeSupportRatio < 0.3) continue;
+    const minSideReq = roiNorm ? 0.25 : 0.38;
+    const meanEdgeReq = roiNorm ? 0.38 : 0.52;
+    if (Math.min(...sideSupport) < minSideReq || edgeSupportRatio < meanEdgeReq) continue;
 
     const bgDiff = Math.abs(sr - bgR) + Math.abs(sg - bgG) + Math.abs(sb - bgB);
     const distToCenter = Math.hypot(centroidX - cxFrame, centroidY - cyFrame);
@@ -639,35 +688,39 @@ export function detectQuadFromSource(
     overlayCanvas.height = procH;
     const overlayCtx = overlayCanvas.getContext("2d");
     if (overlayCtx) {
-      const overlayData = overlayCtx.createImageData(procW, procH);
-      for (const idx of bestRegionPixels) {
-        const oIdx = idx * 4;
-        overlayData.data[oIdx] = 14;
-        overlayData.data[oIdx + 1] = 178;
-        overlayData.data[oIdx + 2] = 154;
-        overlayData.data[oIdx + 3] = 55;
-      }
-      overlayCtx.putImageData(overlayData, 0, 0);
-
-      if (bestProcCorners && bestProcCorners.length === 4) {
-        overlayCtx.save();
-        overlayCtx.strokeStyle = "rgba(52, 211, 153, 0.96)";
-        overlayCtx.lineWidth = 2;
-        overlayCtx.lineJoin = "round";
-        overlayCtx.beginPath();
-        overlayCtx.moveTo(bestProcCorners[0].x, bestProcCorners[0].y);
-        for (let c = 1; c < 4; c++) {
-          overlayCtx.lineTo(bestProcCorners[c].x, bestProcCorners[c].y);
+      if (!bestCorners) {
+        overlayCtx.clearRect(0, 0, procW, procH);
+      } else {
+        const overlayData = overlayCtx.createImageData(procW, procH);
+        for (const idx of bestRegionPixels) {
+          const oIdx = idx * 4;
+          overlayData.data[oIdx] = 14;
+          overlayData.data[oIdx + 1] = 178;
+          overlayData.data[oIdx + 2] = 154;
+          overlayData.data[oIdx + 3] = 55;
         }
-        overlayCtx.closePath();
-        overlayCtx.stroke();
-        overlayCtx.restore();
+        overlayCtx.putImageData(overlayData, 0, 0);
+
+        if (bestProcCorners && bestProcCorners.length === 4) {
+          overlayCtx.save();
+          overlayCtx.strokeStyle = "rgba(52, 211, 153, 0.96)";
+          overlayCtx.lineWidth = 2;
+          overlayCtx.lineJoin = "round";
+          overlayCtx.beginPath();
+          overlayCtx.moveTo(bestProcCorners[0].x, bestProcCorners[0].y);
+          for (let c = 1; c < 4; c++) {
+            overlayCtx.lineTo(bestProcCorners[c].x, bestProcCorners[c].y);
+          }
+          overlayCtx.closePath();
+          overlayCtx.stroke();
+          overlayCtx.restore();
+        }
       }
     }
   }
 
   if (!bestCorners) {
-    return { corners: null, confidence: 28, track: null };
+    return { corners: null, confidence: 0, track: null };
   }
 
   const quality = Math.min(1, 0.55 * bestFillRatio + 0.45 * bestEdgeSupport);

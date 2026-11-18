@@ -17,6 +17,14 @@ export interface TapAnalysis {
   peaks: SpectralPeak[];
 }
 
+export interface AmbientCalibrationProfile {
+  ambientRms: number;
+  ambientMagSpectrum: Float64Array;
+  micType: "mems-mobile" | "wideband";
+  noiseFloorDb: number;
+  sampleRate: number;
+}
+
 function fftInPlace(re: Float64Array, im: Float64Array): void {
   const n = re.length;
   // bit reversal
@@ -58,8 +66,8 @@ function fftInPlace(re: Float64Array, im: Float64Array): void {
 }
 
 /**
- * Transient impulse gate: checks RMS attack ratio AND crest factor (peak / rms)
- * so continuous speech or background hum does not false-trigger a tap.
+ * Transient impulse gate: checks RMS attack ratio AND crest factor (peak / rms >= 5.2)
+ * so stationary Gaussian noise, speech, or fan hum does not false-trigger a tap.
  */
 export function isSharpTapImpulse(samples: Float32Array, ambientRms: number): boolean {
   let sum = 0;
@@ -71,16 +79,100 @@ export function isSharpTapImpulse(samples: Float32Array, ambientRms: number): bo
   }
   const rms = Math.sqrt(sum / Math.max(1, samples.length));
   const crest = peak / Math.max(1e-6, rms);
-  return rms > Math.max(0.02, ambientRms * 3.5) && crest >= 2.8;
+  return rms > Math.max(0.028, ambientRms * 4.5) && crest >= 5.2;
+}
+
+/**
+ * Characterize the room noise floor, normalized ambient PSD (per sqrt(sample)),
+ * and detect MEMS mobile hardware roll-off vs wideband microphone response.
+ */
+export function buildAmbientProfile(
+  chunks: Float32Array[],
+  sampleRate: number
+): AmbientCalibrationProfile {
+  const N = 65536;
+  const half = N / 2;
+  const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
+  const usable = Math.min(totalLen, 16384);
+
+  const combined = new Float64Array(Math.max(2048, usable));
+  let writeIdx = 0;
+  let sumSq = 0;
+  for (const ch of chunks) {
+    for (let i = 0; i < ch.length && writeIdx < combined.length; i++, writeIdx++) {
+      combined[writeIdx] = ch[i];
+      sumSq += ch[i] * ch[i];
+    }
+  }
+  const actualCount = Math.max(1, writeIdx);
+  const ambientRms = Math.max(0.0015, Math.sqrt(sumSq / actualCount));
+  const noiseFloorDb = Math.round(
+    Math.max(-90, Math.min(-10, 20 * Math.log10(ambientRms)))
+  );
+
+  const re = new Float64Array(N);
+  const im = new Float64Array(N);
+  let mean = 0;
+  for (let i = 0; i < actualCount; i++) mean += combined[i];
+  mean /= actualCount;
+
+  const invSqrtN = 1 / Math.sqrt(actualCount);
+  for (let i = 0; i < actualCount; i++) {
+    const w = 0.5 * (1 - Math.cos((2 * Math.PI * i) / Math.max(1, actualCount - 1)));
+    re[i] = (combined[i] - mean) * w;
+  }
+  fftInPlace(re, im);
+
+  const ambientMagSpectrum = new Float64Array(half);
+  for (let i = 0; i < half; i++) {
+    ambientMagSpectrum[i] = Math.sqrt(re[i] * re[i] + im[i] * im[i]) * invSqrtN;
+  }
+
+  // Compare 50-150 Hz energy vs 350-1200 Hz energy to detect mobile MEMS HPF roll-off
+  const binHz = sampleRate / N;
+  const loA = Math.max(2, Math.floor(50 / binHz));
+  const loB = Math.min(half - 1, Math.ceil(150 / binHz));
+  const midA = Math.max(2, Math.floor(350 / binHz));
+  const midB = Math.min(half - 1, Math.ceil(1200 / binHz));
+  let lowEnergy = 0;
+  for (let i = loA; i <= loB; i++) lowEnergy += ambientMagSpectrum[i];
+  lowEnergy /= Math.max(1, loB - loA + 1);
+  let midEnergy = 0;
+  for (let i = midA; i <= midB; i++) midEnergy += ambientMagSpectrum[i];
+  midEnergy /= Math.max(1, midB - midA + 1);
+
+  const isMobileUa =
+    typeof navigator !== "undefined" &&
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const micType: "mems-mobile" | "wideband" =
+    isMobileUa || lowEnergy < midEnergy * 0.45 ? "mems-mobile" : "wideband";
+
+  return {
+    ambientRms,
+    ambientMagSpectrum,
+    micType,
+    noiseFloorDb,
+    sampleRate,
+  };
+}
+
+function windowRms(samples: Float32Array, start: number, end: number): number {
+  const s = Math.max(0, start);
+  const e = Math.min(samples.length, end);
+  if (e <= s) return 0;
+  let sum = 0;
+  for (let i = s; i < e; i++) sum += samples[i] * samples[i];
+  return Math.sqrt(sum / (e - s));
 }
 
 export function analyzeTapSignal(
   samples: Float32Array,
   sampleRate: number,
   minHz = 100,
-  maxHz = 4000
+  maxHz = 4000,
+  ambientProfile?: AmbientCalibrationProfile
 ): TapAnalysis | null {
-  // Align window to impact peak sample so pre-tap silence does not dilute FFT or decay
+  // Find global peak sample
   let peakIdx = 0;
   let peakVal = 0;
   for (let i = 0; i < samples.length; i++) {
@@ -90,6 +182,29 @@ export function analyzeTapSignal(
       peakIdx = i;
     }
   }
+
+  // Physical Tap Decay Envelope Verification (reject continuous speech, fans, music)
+  const ambFloor = ambientProfile?.ambientRms ?? 0.0025;
+  if (peakIdx >= 192) {
+    const preRms = windowRms(samples, peakIdx - 1024, peakIdx - 128);
+    const attackRms = windowRms(samples, peakIdx - 32, peakIdx + 256);
+    if (attackRms / Math.max(preRms, ambFloor, 1e-5) < 4.2) {
+      return null;
+    }
+  }
+
+  const w1End = peakIdx + Math.round(0.025 * sampleRate);
+  const w2End = peakIdx + Math.round(0.065 * sampleRate);
+  const w3End = peakIdx + Math.round(0.13 * sampleRate);
+  if (samples.length >= w3End && w2End > w1End && w3End > w2End) {
+    const rmsW1 = windowRms(samples, peakIdx, w1End);
+    const rmsW2 = windowRms(samples, w1End, w2End);
+    const rmsW3 = windowRms(samples, w2End, w3End);
+    if (rmsW1 <= rmsW2 * 1.12 || rmsW1 <= rmsW3 * 1.5) {
+      return null;
+    }
+  }
+
   const startIdx = Math.max(0, peakIdx - 64);
   const aligned = samples.subarray(startIdx);
   const usable = Math.min(aligned.length, 32768);
@@ -113,7 +228,26 @@ export function analyzeTapSignal(
   const half = N / 2;
   const binHz = sampleRate / N;
   const mag = new Float64Array(half);
-  for (let i = 0; i < half; i++) mag[i] = Math.sqrt(re[i] * re[i] + im[i] * im[i]);
+  const ambScale = Math.sqrt(usable);
+  const ambSpec = ambientProfile?.ambientMagSpectrum;
+  const isMobileMems = ambientProfile?.micType === "mems-mobile";
+
+  for (let i = 0; i < half; i++) {
+    let m = Math.sqrt(re[i] * re[i] + im[i] * im[i]);
+    if (ambSpec && i < ambSpec.length) {
+      // Spectral Pre-Whitening against stationary room/mic noise spectrum
+      m = Math.max(0, m - 1.4 * ambSpec[i] * ambScale);
+    }
+    if (isMobileMems) {
+      const f = i * binHz;
+      if (f >= 40 && f < 240) {
+        // +3 dB/oct MEMS low-frequency roll-off compensation
+        const gainDb = 3.0 * Math.log2(240 / f);
+        m *= Math.pow(10, gainDb / 20);
+      }
+    }
+    mag[i] = m;
+  }
 
   const lo = Math.max(2, Math.floor(minHz / binHz));
   const hi = Math.min(half - 2, Math.floor(maxHz / binHz));
@@ -121,14 +255,20 @@ export function analyzeTapSignal(
   // local maxima list
   const cand: { i: number; m: number }[] = [];
   for (let i = lo; i <= hi; i++) {
-    if (mag[i] > mag[i - 1] && mag[i] >= mag[i + 1]) cand.push({ i, m: mag[i] });
+    if (mag[i] > mag[i - 1] && mag[i] >= mag[i + 1] && mag[i] > 1e-12) {
+      cand.push({ i, m: mag[i] });
+    }
   }
   if (cand.length === 0) return null;
   cand.sort((a, b) => b.m - a.m);
 
-  // noise floor = median magnitude in range
+  // noise floor = median magnitude in range (guarded away from zero after spectral subtraction)
   const sorted = Array.from(mag.subarray(lo, hi + 1)).sort((a, b) => a - b);
-  const median = sorted[Math.floor(sorted.length / 2)] || 1e-12;
+  const rawMedian = sorted[Math.floor(sorted.length / 2)];
+  const p75 = sorted[Math.floor(sorted.length * 0.75)];
+  const medianVal = Math.max(rawMedian, p75 * 0.35, 1e-9);
+  const snrDb = Math.round(20 * Math.log10(cand[0].m / medianVal));
+  if (snrDb < 13) return null;
 
   const refine = (i: number): number => {
     const a = Math.log(mag[i - 1] + 1e-18);
@@ -206,7 +346,7 @@ export function analyzeTapSignal(
   return {
     peakHz: Math.round(f0 * 10) / 10,
     qFactor: q,
-    snrDb: Math.round(20 * Math.log10(top.m / median)),
+    snrDb,
     peaks,
   };
 }

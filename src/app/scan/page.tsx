@@ -139,17 +139,17 @@ export default function WorkpieceScanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraActive, uploadedImageUrl, guideOpen]);
 
-  // Automation 0: once the guide is closed and the camera/photo is ready, AI detects the board by itself
+  // Automation 0: once the guide is closed and a real board (confidence >= 75) or uploaded photo is present, identify it automatically
   useEffect(() => {
-    if (guideOpen || !(cameraActive || uploadedImageUrl)) return;
+    if (guideOpen || !(uploadedImageUrl || (cameraActive && edgeConfidence >= 75))) return;
     const t = setTimeout(() => {
       if (autoDetectedRef.current) return;
       autoDetectedRef.current = true;
       void handleAutoSegment();
-    }, 1600);
+    }, 1200);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guideOpen, cameraActive, uploadedImageUrl]);
+  }, [guideOpen, cameraActive, uploadedImageUrl, edgeConfidence]);
 
   // Autopilot: once locked, continue to the next screen automatically
   useAutoAdvance(isLocked && !guideOpen, 2200, () => handleConfirmAndProceed());
@@ -165,7 +165,7 @@ export default function WorkpieceScanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadedImageUrl, edgeConfidence, isLocked]);
 
-  // Automation 2: auto-lock only when confidence >= 80, opposite sides are parallel (<22% skew), and quad stays steady
+  // Automation 2: auto-lock only when confidence >= 84, opposite sides are parallel (<18% skew), and quad stays steady
   const lastPolyRef = useRef<{ x: number; y: number }[] | null>(null);
   const stableCountRef = useRef<number>(0);
   useEffect(() => {
@@ -176,10 +176,10 @@ export default function WorkpieceScanPage() {
     const parallelOk =
       Math.max(topW, botW) > 10 &&
       Math.max(leftH, rightH) > 10 &&
-      Math.abs(topW - botW) / Math.max(topW, botW) < 0.22 &&
-      Math.abs(leftH - rightH) / Math.max(leftH, rightH) < 0.22;
+      Math.abs(topW - botW) / Math.max(topW, botW) < 0.18 &&
+      Math.abs(leftH - rightH) / Math.max(leftH, rightH) < 0.18;
 
-    if (isLocked || edgeConfidence < 80 || !parallelOk || activePinIndex !== null) {
+    if (isLocked || edgeConfidence < 84 || !parallelOk || activePinIndex !== null) {
       stableCountRef.current = 0;
       lastPolyRef.current = polygonCoords;
       return;
@@ -193,7 +193,7 @@ export default function WorkpieceScanPage() {
       stableCountRef.current = maxDelta < 4 ? stableCountRef.current + 1 : 0;
     }
     lastPolyRef.current = polygonCoords;
-    if (stableCountRef.current >= 18) {
+    if (stableCountRef.current >= 22) {
       lockBoundary();
       stableCountRef.current = 0;
       setScanMessage("AI locked onto your board automatically. Tap Continue!");
@@ -615,13 +615,24 @@ export default function WorkpieceScanPage() {
 
           {/* Live Floating Telemetry Overlay */}
           <div className="absolute top-3 left-3 flex flex-col gap-1.5 pointer-events-none">
-            <HudBadge variant={isLocked ? "safe" : cameraActive || uploadedImageUrl ? "teal" : "warning"} dot>
+            <HudBadge
+              variant={
+                isLocked
+                  ? "safe"
+                  : uploadedImageUrl || (cameraActive && edgeConfidence > 0)
+                  ? "teal"
+                  : "warning"
+              }
+              dot
+            >
               {isLocked
                 ? "POLYGON LOCKED"
                 : uploadedImageUrl
                 ? `IMAGE CV // ${edgeConfidence}% CONF`
                 : cameraActive
-                ? isAutoTracking
+                ? edgeConfidence === 0
+                  ? "WAITING FOR WORKPIECE — PLACE BOARD IN FRAME"
+                  : isAutoTracking
                   ? `LIVE CV TRACKING // ${edgeConfidence}%`
                   : "MANUAL PIN MODE"
                 : "MANUAL MODE"}
