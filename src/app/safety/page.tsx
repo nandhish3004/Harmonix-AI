@@ -280,9 +280,9 @@ export default function ComponentSafetyPage() {
     const anyRisk = components.some((c) => computeScore(c) < 70);
     if (anyRisk && standoffs.length === 0) {
       handleAutoOptimizeStandoff();
-      setAiNote("✨ AI spotted a risky part and added a support screw (S1) to protect it.");
+      setAiNote("AI spotted a risky part and added a support screw (S1) to protect it.");
     } else if (!anyRisk) {
-      setAiNote("✅ All parts are already in safe spots. Nice!");
+      setAiNote("All parts are already in safe spots.");
     }
   };
   useEffect(() => {
@@ -427,7 +427,7 @@ export default function ComponentSafetyPage() {
             size="md"
             onClick={() => {
               handleAutoOptimizeStandoff();
-              setAiNote("✨ AI added another support screw where it helps most.");
+              setAiNote("AI added another support screw where it helps most.");
             }}
             className="flex items-center justify-center gap-1.5"
           >

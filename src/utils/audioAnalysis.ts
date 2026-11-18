@@ -57,13 +57,42 @@ function fftInPlace(re: Float64Array, im: Float64Array): void {
   }
 }
 
+/**
+ * Transient impulse gate: checks RMS attack ratio AND crest factor (peak / rms)
+ * so continuous speech or background hum does not false-trigger a tap.
+ */
+export function isSharpTapImpulse(samples: Float32Array, ambientRms: number): boolean {
+  let sum = 0;
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const a = Math.abs(samples[i]);
+    sum += samples[i] * samples[i];
+    if (a > peak) peak = a;
+  }
+  const rms = Math.sqrt(sum / Math.max(1, samples.length));
+  const crest = peak / Math.max(1e-6, rms);
+  return rms > Math.max(0.02, ambientRms * 3.5) && crest >= 2.8;
+}
+
 export function analyzeTapSignal(
   samples: Float32Array,
   sampleRate: number,
   minHz = 100,
   maxHz = 4000
 ): TapAnalysis | null {
-  const usable = Math.min(samples.length, 32768);
+  // Align window to impact peak sample so pre-tap silence does not dilute FFT or decay
+  let peakIdx = 0;
+  let peakVal = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const a = Math.abs(samples[i]);
+    if (a > peakVal) {
+      peakVal = a;
+      peakIdx = i;
+    }
+  }
+  const startIdx = Math.max(0, peakIdx - 64);
+  const aligned = samples.subarray(startIdx);
+  const usable = Math.min(aligned.length, 32768);
   if (usable < 2048) return null;
 
   const N = 65536; // zero-padded size => ~0.7 Hz bins at 48 kHz
@@ -72,11 +101,11 @@ export function analyzeTapSignal(
 
   // remove DC and apply Hann window
   let mean = 0;
-  for (let i = 0; i < usable; i++) mean += samples[i];
+  for (let i = 0; i < usable; i++) mean += aligned[i];
   mean /= usable;
   for (let i = 0; i < usable; i++) {
     const w = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (usable - 1)));
-    re[i] = (samples[i] - mean) * w;
+    re[i] = (aligned[i] - mean) * w;
   }
 
   fftInPlace(re, im);
@@ -131,7 +160,48 @@ export function analyzeTapSignal(
   const rf = r - 1 + (mag[r - 1] - halfPower) / Math.max(1e-18, mag[r - 1] - mag[r]);
   const bw = Math.max(binHz * 2, (rf - lf) * binHz);
   const f0 = refine(top.i);
-  const q = Math.max(5, Math.min(2000, Math.round(f0 / bw)));
+  const qBw = Math.max(5, Math.min(2000, Math.round(f0 / bw)));
+
+  // Ring-down envelope decay fit over 6 sub-windows following the impact peak
+  const decaySlice = aligned.subarray(Math.min(64, usable), usable);
+  let q = qBw;
+  const subCount = 6;
+  const subLen = Math.floor(decaySlice.length / subCount);
+  if (subLen >= 128) {
+    let sumT = 0;
+    let sumY = 0;
+    let sumTT = 0;
+    let sumTY = 0;
+    let validPts = 0;
+    for (let k = 0; k < subCount; k++) {
+      let s2 = 0;
+      const off = k * subLen;
+      for (let j = 0; j < subLen; j++) {
+        const v = decaySlice[off + j] - mean;
+        s2 += v * v;
+      }
+      const subRms = Math.sqrt(s2 / subLen);
+      if (subRms > 1e-6) {
+        const tk = ((k + 0.5) * subLen) / sampleRate;
+        const yk = Math.log(subRms);
+        sumT += tk;
+        sumY += yk;
+        sumTT += tk * tk;
+        sumTY += tk * yk;
+        validPts++;
+      }
+    }
+    if (validPts >= 3) {
+      const denom = validPts * sumTT - sumT * sumT;
+      if (Math.abs(denom) > 1e-9) {
+        const slope = (validPts * sumTY - sumT * sumY) / denom;
+        if (slope < -0.5) {
+          const qDecay = Math.max(5, Math.min(2000, (-Math.PI * f0) / slope));
+          q = Math.round(0.6 * qDecay + 0.4 * qBw);
+        }
+      }
+    }
+  }
 
   return {
     peakHz: Math.round(f0 * 10) / 10,

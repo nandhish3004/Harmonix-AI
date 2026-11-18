@@ -9,7 +9,7 @@ import { HudButton } from "@/components/ui/HudButton";
 import { TestGuide } from "@/components/guide/TestGuide";
 import { useAutoAdvance, useAutopilot } from "@/context/autopilot";
 import { classifyTapHF } from "@/utils/aiClient";
-import { analyzeTapSignal, encodeWav, median, resampleTo16k } from "@/utils/audioAnalysis";
+import { analyzeTapSignal, encodeWav, isSharpTapImpulse, median, resampleTo16k } from "@/utils/audioAnalysis";
 import { speak } from "@/utils/voice";
 import {
   computeAllModes,
@@ -159,7 +159,7 @@ export default function FindItsNotePage() {
         const rms = Math.sqrt(s / shortBuf.length);
         setLevel(Math.min(1, rms * 14));
 
-        if (rms > threshold) {
+        if (isSharpTapImpulse(shortBuf, ambient) && rms > threshold) {
           // Wait ~220ms for post-impact ring-down to fill buffer cleanly
           await new Promise((r) => setTimeout(r, 220));
           analyser.getFloatTimeDomainData(buf);
@@ -206,8 +206,9 @@ export default function FindItsNotePage() {
 
       let topAst: string | null = null;
       if (bestAudioSample) {
-        const wav = encodeWav(resampleTo16k(bestAudioSample, sampleRate), 16000);
-        const hfRes = await classifyTapHF(wav);
+        const samples16k = resampleTo16k(bestAudioSample, sampleRate);
+        const wav = encodeWav(samples16k, 16000);
+        const hfRes = await classifyTapHF(wav, samples16k);
         if (hfRes && hfRes.labels.length > 0) {
           const top = hfRes.labels[0];
           topAst = `${top.label} (${Math.round(top.score * 100)}%)`;
@@ -284,10 +285,10 @@ export default function FindItsNotePage() {
     resultQ === null
       ? null
       : resultQ >= 60
-      ? "Long, clean ring — board feels solid ✓"
+      ? "Long, clean ring — board feels solid"
       : resultQ >= 25
       ? "Normal ring"
-      : "Short, dull ring — possible damping or damage ⚠";
+      : "Short, dull ring — possible damping or damage";
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -371,7 +372,7 @@ export default function FindItsNotePage() {
             {ringQuality && <p className="text-xs font-semibold">{ringQuality}</p>}
             {astLabel && (
               <p className="text-[11px] text-slate-600 dark:text-[#8C999A]">
-                🤗 Hugging Face AST audio class: <b>{astLabel}</b>
+                Hugging Face AST audio class: <b>{astLabel}</b>
               </p>
             )}
 

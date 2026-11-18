@@ -7,6 +7,8 @@ import {
   FileText,
   CloudUpload,
   RotateCcw,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
@@ -286,8 +288,12 @@ EOF
               : "bg-gradient-to-br from-amber-500 to-amber-600 shadow-amber-400/30"
           }`}
         >
-          <div className="text-4xl mb-1">
-            {!defectDetected && safetyScore >= 70 ? "✅" : defectDetected ? "⚠️" : "🟠"}
+          <div className="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center mb-2">
+            {!defectDetected && safetyScore >= 70 ? (
+              <CheckCircle2 className="w-6 h-6 text-white" />
+            ) : (
+              <AlertTriangle className="w-6 h-6 text-white" />
+            )}
           </div>
           <h2 className="text-xl font-extrabold leading-tight">
             {!defectDetected && safetyScore >= 70

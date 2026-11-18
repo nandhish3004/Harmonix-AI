@@ -151,7 +151,7 @@ export default function WorkpieceScanPage() {
     if (!uploadedImageUrl || isLocked || edgeConfidence < 60) return;
     const t = setTimeout(() => {
       lockBoundary();
-      setScanMessage("✅ AI outlined your board. Tap Continue — or Unlock to adjust.");
+      setScanMessage("AI outlined your board. Tap Continue — or Unlock to adjust.");
     }, 1500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -178,7 +178,7 @@ export default function WorkpieceScanPage() {
     if (stableCountRef.current >= 14) {
       lockBoundary();
       stableCountRef.current = 0;
-      setScanMessage("✅ AI locked onto your board automatically. Tap Continue!");
+      setScanMessage("AI locked onto your board automatically. Tap Continue!");
       void speak("Board locked.", { interrupt: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -255,27 +255,31 @@ export default function WorkpieceScanPage() {
             if (blob) {
               const det = await detectBoardHF(blob);
               if (det) {
-                const x0 = Math.max(8, Math.round(det.box.xmin / S));
-                const y0 = Math.max(8, Math.round(det.box.ymin / S));
-                const x1 = Math.min(cw - 8, Math.round(det.box.xmax / S));
-                const y1 = Math.min(ch - 8, Math.round(det.box.ymax / S));
-                if (x1 - x0 > 40 && y1 - y0 > 40) {
-                  updateCornerPoint(0, x0, y0);
-                  updateCornerPoint(1, x1, y0);
-                  updateCornerPoint(2, x1, y1);
-                  updateCornerPoint(3, x0, y1);
-                  setAiEngine(`Hugging Face · ${det.model.split("/").pop()}`);
-                  if (typeof window !== "undefined" && det.materialId) {
-                    localStorage.setItem("harmonix_hf_material", det.materialId);
-                    localStorage.setItem("harmonix_hf_material_label", det.label);
-                  }
-                  setScanMessage(
-                    `🤗 Hugging Face found "${det.label}" (${Math.round(det.score * 100)}% sure) and outlined it.`
-                  );
-                  void speak("I found your board.", { interrupt: false });
-                  setTimeout(() => setScanMessage(null), 4000);
-                  return;
+                if (typeof window !== "undefined" && det.materialId) {
+                  localStorage.setItem("harmonix_hf_material", det.materialId);
+                  localStorage.setItem("harmonix_hf_material_label", det.label);
                 }
+                if (det.box) {
+                  const x0 = Math.max(8, Math.round(det.box.xmin / S));
+                  const y0 = Math.max(8, Math.round(det.box.ymin / S));
+                  const x1 = Math.min(cw - 8, Math.round(det.box.xmax / S));
+                  const y1 = Math.min(ch - 8, Math.round(det.box.ymax / S));
+                  if (x1 - x0 > 40 && y1 - y0 > 40) {
+                    updateCornerPoint(0, x0, y0);
+                    updateCornerPoint(1, x1, y0);
+                    updateCornerPoint(2, x1, y1);
+                    updateCornerPoint(3, x0, y1);
+                  }
+                } else {
+                  detectOnce();
+                }
+                setAiEngine(`Hugging Face · ${det.model.split("/").pop()}`);
+                setScanMessage(
+                  `Hugging Face detected "${det.label}" (${Math.round(det.score * 100)}% confidence).`
+                );
+                void speak("I found your board.", { interrupt: false });
+                setTimeout(() => setScanMessage(null), 4000);
+                return;
               }
             }
           }

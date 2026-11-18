@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ArrowRight, Sparkles } from "lucide-react";
+import { Check, ArrowRight, Sparkles, Cpu, Box, Shield, Layers } from "lucide-react";
 import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
@@ -10,7 +10,7 @@ import { MATERIAL_CONSTANTS, MaterialData } from "@/utils/physics";
 import { useAutoAdvance } from "@/context/autopilot";
 
 interface MaterialConfig extends MaterialData {
-  emoji: string;
+  Icon: React.ElementType;
   plain: string;
   tag: string;
 }
@@ -18,7 +18,7 @@ interface MaterialConfig extends MaterialData {
 const MATERIALS: MaterialConfig[] = [
   {
     id: "fr4",
-    emoji: "🟩",
+    Icon: Cpu,
     name: "Circuit Board (FR4)",
     code: "PCB-FR4-STD",
     category: "CIRCUIT SUBSTRATE",
@@ -32,7 +32,7 @@ const MATERIALS: MaterialConfig[] = [
   },
   {
     id: "al6061",
-    emoji: "⬜",
+    Icon: Box,
     name: "Aluminium Plate",
     code: "AL-6061-T6",
     category: "AEROSPACE ALLOY",
@@ -46,7 +46,7 @@ const MATERIALS: MaterialConfig[] = [
   },
   {
     id: "steel",
-    emoji: "🔩",
+    Icon: Shield,
     name: "Steel Plate",
     code: "STEEL-AISI-1018",
     category: "FERROUS ALLOY",
@@ -60,7 +60,7 @@ const MATERIALS: MaterialConfig[] = [
   },
   {
     id: "acrylic",
-    emoji: "🔷",
+    Icon: Layers,
     name: "Acrylic Sheet",
     code: "PMMA-CAST",
     category: "POLYMER",
@@ -205,6 +205,7 @@ export default function MaterialSelectionPage() {
         <div className="grid grid-cols-2 gap-3">
           {MATERIALS.map((mat) => {
             const isSelected = selectedMaterialId === mat.id;
+            const MatIcon = mat.Icon;
             return (
               <button
                 key={mat.id}
@@ -217,7 +218,9 @@ export default function MaterialSelectionPage() {
                   className="p-3.5 h-full flex flex-col gap-2"
                 >
                   <div className="flex items-start justify-between">
-                    <span className="text-3xl leading-none">{mat.emoji}</span>
+                    <span className="w-10 h-10 rounded-2xl bg-sky-50 dark:bg-[#1C332E] border border-sky-200 dark:border-[#0EB29A]/40 text-sky-600 dark:text-[#0EB29A] flex items-center justify-center">
+                      <MatIcon className="w-5 h-5" />
+                    </span>
                     {isSelected ? (
                       <span className="w-6 h-6 rounded-full brand-gradient flex items-center justify-center text-white">
                         <Check className="w-3.5 h-3.5 stroke-[3]" />

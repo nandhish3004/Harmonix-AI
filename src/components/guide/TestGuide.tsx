@@ -1,16 +1,27 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Play, RotateCcw, SkipForward } from "lucide-react";
+import {
+  Check,
+  Eye,
+  Mic,
+  Play,
+  RotateCcw,
+  ScanLine,
+  ShieldCheck,
+  SkipForward,
+  Sliders,
+  Stethoscope,
+} from "lucide-react";
 import { speak, cancelSpeech, sleep, isVoiceOn } from "@/utils/voice";
 import { useAutopilot } from "@/context/autopilot";
 import { VoiceToggle } from "@/components/ui/VoiceToggle";
 
 export type GuideKind = "setup" | "scan" | "tap" | "ar" | "safety" | "health";
 
-const GUIDES: Record<GuideKind, { emoji: string; title: string; cta: string; steps: string[] }> = {
+const GUIDES: Record<GuideKind, { Icon: React.ElementType; title: string; cta: string; steps: string[] }> = {
   setup: {
-    emoji: "🔧",
+    Icon: Sliders,
     title: "Quick Check",
     cta: "Start check",
     steps: [
@@ -21,7 +32,7 @@ const GUIDES: Record<GuideKind, { emoji: string; title: string; cta: string; ste
     ],
   },
   scan: {
-    emoji: "📸",
+    Icon: ScanLine,
     title: "Scan Your Board",
     cta: "Start scanning",
     steps: [
@@ -32,7 +43,7 @@ const GUIDES: Record<GuideKind, { emoji: string; title: string; cta: string; ste
     ],
   },
   tap: {
-    emoji: "🎵",
+    Icon: Mic,
     title: "Tap Test",
     cta: "Start tap test",
     steps: [
@@ -43,7 +54,7 @@ const GUIDES: Record<GuideKind, { emoji: string; title: string; cta: string; ste
     ],
   },
   ar: {
-    emoji: "🕶️",
+    Icon: Eye,
     title: "Live AR View",
     cta: "Open AR",
     steps: [
@@ -54,7 +65,7 @@ const GUIDES: Record<GuideKind, { emoji: string; title: string; cta: string; ste
     ],
   },
   safety: {
-    emoji: "🛡️",
+    Icon: ShieldCheck,
     title: "Part Safety",
     cta: "Check my parts",
     steps: [
@@ -64,7 +75,7 @@ const GUIDES: Record<GuideKind, { emoji: string; title: string; cta: string; ste
     ],
   },
   health: {
-    emoji: "🩺",
+    Icon: Stethoscope,
     title: "Health Check",
     cta: "Run health check",
     steps: [
@@ -226,6 +237,7 @@ interface TestGuideProps {
 
 export const TestGuide: React.FC<TestGuideProps> = ({ kind, open, onDone }) => {
   const guide = GUIDES[kind];
+  const GuideIcon = guide.Icon;
   const { enabled } = useAutopilot();
   const [active, setActive] = useState<number>(0);
   const [finished, setFinished] = useState<boolean>(false);
@@ -279,8 +291,10 @@ export const TestGuide: React.FC<TestGuideProps> = ({ kind, open, onDone }) => {
     <div className="fixed inset-0 z-[70] bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">
       <div className="w-full max-w-[440px] bg-white dark:bg-[#0D191C] rounded-t-3xl p-5 pb-6 shadow-2xl max-h-[94vh] overflow-y-auto pop-in">
         <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl">{guide.emoji}</span>
+          <div className="flex items-center gap-2.5">
+            <span className="w-9 h-9 rounded-xl bg-sky-50 dark:bg-[#1C332E] border border-sky-200 dark:border-[#0EB29A]/40 text-sky-600 dark:text-[#0EB29A] flex items-center justify-center">
+              <GuideIcon className="w-5 h-5" />
+            </span>
             <div className="leading-tight">
               <div className="text-[10px] font-bold text-sky-600 dark:text-[#0EB29A]">HOW THIS TEST WORKS</div>
               <h2 className="text-lg font-extrabold text-slate-900 dark:text-[#F5FDFF]">{guide.title}</h2>
@@ -312,7 +326,7 @@ export const TestGuide: React.FC<TestGuideProps> = ({ kind, open, onDone }) => {
                     : "bg-slate-200 dark:bg-[#233A3D] text-slate-500"
                 }`}
               >
-                {i < active || finished ? "✓" : i + 1}
+                {i < active || finished ? <Check className="w-3 h-3" /> : i + 1}
               </span>
               <span>{s}</span>
             </li>

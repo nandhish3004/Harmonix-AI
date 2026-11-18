@@ -108,11 +108,29 @@ export function detectQuadFromSource(
   const data = imgData.data;
   const total = procW * procH;
 
-  // 1. Grayscale luminance
+  // 1. Grayscale luminance + outer-border background color estimation
   const gray = new Float32Array(total);
-  for (let i = 0; i < total; i++) {
-    const idx = i * 4;
-    gray[i] = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+  let bgR = 0, bgG = 0, bgB = 0, bgCount = 0;
+  for (let y = 0; y < procH; y++) {
+    for (let x = 0; x < procW; x++) {
+      const i = y * procW + x;
+      const idx = i * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      gray[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (y < 6 || y >= procH - 6 || x < 6 || x >= procW - 6) {
+        bgR += r;
+        bgG += g;
+        bgB += b;
+        bgCount++;
+      }
+    }
+  }
+  if (bgCount > 0) {
+    bgR /= bgCount;
+    bgG /= bgCount;
+    bgB /= bgCount;
   }
 
   // 2. 3x3 Gaussian-weighted blur to suppress noise
@@ -144,7 +162,24 @@ export function detectQuadFromSource(
       const gy =
         -blurred[i - procW - 1] - 2 * blurred[i - procW] - blurred[i - procW + 1] +
         blurred[i + procW - 1] + 2 * blurred[i + procW] + blurred[i + procW + 1];
-      const m = Math.abs(gx) + Math.abs(gy);
+      const rawMag = Math.abs(gx) + Math.abs(gy);
+
+      // Combine gradient magnitude with border-contrast saliency and reject skin tones
+      const dIdx = i * 4;
+      const r = data[dIdx];
+      const g = data[dIdx + 1];
+      const b = data[dIdx + 2];
+      const colorDist = Math.abs(r - bgR) + Math.abs(g - bgG) + Math.abs(b - bgB);
+      const isSkin =
+        r > 95 &&
+        g > 40 &&
+        b > 20 &&
+        r > g &&
+        r - g > 15 &&
+        r - b > 15 &&
+        Math.abs(r - g) < 110;
+      const m = isSkin ? rawMag * 0.35 : rawMag + colorDist * 0.22;
+
       mag[i] = m;
       sumMag += m;
       if (m > maxMag) maxMag = m;
@@ -514,13 +549,17 @@ export function useBoundaryDetection(): BoundaryDetectionState {
             );
             setEdgeConfidence(confidence);
             if (corners) {
-              // EMA smoothing to prevent jitter
+              // Adaptive One-Euro style velocity smoothing
               setPolygonCoords((prev) =>
-                prev.map((p, idx) => ({
-                  ...p,
-                  x: Math.round(p.x * 0.72 + corners[idx].x * 0.28),
-                  y: Math.round(p.y * 0.72 + corners[idx].y * 0.28),
-                }))
+                prev.map((p, idx) => {
+                  const delta = Math.hypot(corners[idx].x - p.x, corners[idx].y - p.y);
+                  const alpha = delta < 5 ? 0.1 : delta < 16 ? 0.25 : 0.5;
+                  return {
+                    ...p,
+                    x: Math.round(p.x * (1 - alpha) + corners[idx].x * alpha),
+                    y: Math.round(p.y * (1 - alpha) + corners[idx].y * alpha),
+                  };
+                })
               );
             }
           }

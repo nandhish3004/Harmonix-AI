@@ -2,7 +2,19 @@
 
 import React from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  Eye,
+  FileText,
+  Flame,
+  Grid3X3,
+  Layers,
+  ScanLine,
+  ShieldCheck,
+  Sliders,
+  Stethoscope,
+} from "lucide-react";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { VoiceToggle } from "@/components/ui/VoiceToggle";
 
@@ -15,18 +27,18 @@ interface HudHeaderProps {
   rightAction?: React.ReactNode;
 }
 
-/** Plain-English titles + one-line instructions for every screen (centralised UX copy). */
-const FRIENDLY: Record<number, { emoji: string; title: string; tip: string }> = {
-  1: { emoji: "🔧", title: "Get Ready", tip: "Allow camera & mic. We check everything for you." },
-  2: { emoji: "📸", title: "Scan Your Board", tip: "Point at your board — AI finds the edges by itself." },
-  3: { emoji: "🧱", title: "Pick Material", tip: "AI guesses the material from your scan. Confirm or change." },
-  4: { emoji: "🕶️", title: "Live AR View", tip: "See invisible vibrations on your real board." },
-  5: { emoji: "🎵", title: "Find Its Note", tip: "Tap the board. AI listens and finds its natural pitch." },
-  6: { emoji: "🌈", title: "Vibration Shapes", tip: "AI picked the best pattern for your board." },
-  7: { emoji: "🛡️", title: "Part Safety", tip: "Green = safe, Red = may crack. AI protects parts for you." },
-  8: { emoji: "🔥", title: "Stress Map", tip: "Hot colors show where the board may break." },
-  9: { emoji: "🩺", title: "Health Check", tip: "Compare against a healthy board for hidden damage." },
-  10: { emoji: "📄", title: "Your Report", tip: "Download or share your results." },
+/** Plain-English titles + crisp Lucide icons for every screen (no emojis). */
+const FRIENDLY: Record<number, { Icon: React.ElementType; title: string; tip: string }> = {
+  1: { Icon: Sliders, title: "Get Ready", tip: "Allow camera & mic. We check everything for you." },
+  2: { Icon: ScanLine, title: "Scan Your Board", tip: "Point at your board — AI finds the edges by itself." },
+  3: { Icon: Layers, title: "Pick Material", tip: "AI guesses the material from your scan. Confirm or change." },
+  4: { Icon: Eye, title: "Live AR View", tip: "See invisible vibrations on your real board." },
+  5: { Icon: Activity, title: "Find Its Note", tip: "Tap the board. AI listens and finds its natural pitch." },
+  6: { Icon: Grid3X3, title: "Vibration Shapes", tip: "AI picked the best pattern for your board." },
+  7: { Icon: ShieldCheck, title: "Part Safety", tip: "Green = safe, Red = may crack. AI protects parts for you." },
+  8: { Icon: Flame, title: "Stress Map", tip: "Hot colors show where the board may break." },
+  9: { Icon: Stethoscope, title: "Health Check", tip: "Compare against a healthy board for hidden damage." },
+  10: { Icon: FileText, title: "Your Report", tip: "Download or share your results." },
 };
 
 function parseStep(step?: string): number | null {
@@ -48,6 +60,7 @@ export const HudHeader: React.FC<HudHeaderProps> = ({
   const router = useRouter();
   const stepNum = parseStep(step);
   const friendly = stepNum ? FRIENDLY[stepNum] : null;
+  const HeaderIcon = friendly?.Icon;
 
   const handleBack = () => {
     if (onBack) onBack();
@@ -78,8 +91,12 @@ export const HudHeader: React.FC<HudHeaderProps> = ({
                 Step {stepNum} of 10
               </span>
             )}
-            <h1 className="text-lg font-extrabold leading-tight text-slate-900 dark:text-[#F5FDFF] flex items-center gap-1.5 truncate">
-              {friendly && <span className="text-xl">{friendly.emoji}</span>}
+            <h1 className="text-lg font-extrabold leading-tight text-slate-900 dark:text-[#F5FDFF] flex items-center gap-2 truncate">
+              {HeaderIcon && (
+                <span className="w-6 h-6 shrink-0 rounded-lg bg-sky-50 dark:bg-[#1C332E] text-sky-600 dark:text-[#0EB29A] flex items-center justify-center">
+                  <HeaderIcon className="w-3.5 h-3.5" />
+                </span>
+              )}
               <span className="truncate">{shownTitle}</span>
             </h1>
           </div>

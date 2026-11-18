@@ -166,7 +166,7 @@ export default function ChladniViewportPage() {
         setIsFinding(false);
         setSweepDone(true);
         setAiMessage(
-          `✅ Locked! Your board resonates at ${Math.round(end)} Hz — watch the colors light up.`
+          `Locked! Your board resonates at ${Math.round(end)} Hz — watch the colors light up.`
         );
         void speak(`Resonance locked at ${Math.round(end)} hertz.`, { interrupt: false });
         setTimeout(() => setAiMessage(null), 5000);
@@ -308,10 +308,14 @@ export default function ChladniViewportPage() {
           workCanvas
         );
         if (res.corners && res.corners.length === 4 && res.confidence >= 45) {
-          trackedQuad = trackedQuad.map((p, idx) => ({
-            x: p.x * 0.82 + res.corners![idx].x * 0.18,
-            y: p.y * 0.82 + res.corners![idx].y * 0.18,
-          }));
+          trackedQuad = trackedQuad.map((p, idx) => {
+            const delta = Math.hypot(res.corners![idx].x - p.x, res.corners![idx].y - p.y);
+            const alpha = delta < 5 ? 0.1 : 0.24;
+            return {
+              x: p.x * (1 - alpha) + res.corners![idx].x * alpha,
+              y: p.y * (1 - alpha) + res.corners![idx].y * alpha,
+            };
+          });
         }
       }
 
@@ -470,7 +474,7 @@ export default function ChladniViewportPage() {
           const amp = Math.abs(evalAmp(a.u, a.v));
           const safe = amp < 0.28;
           const color = safe ? "#34D399" : "#FB7185";
-          const tag = `${a.label}: ${safe ? "Safe ✓" : "Shaky ⚠"}`;
+          const tag = `${a.label}: ${safe ? "Safe" : "High Vib"}`;
 
           ctx.strokeStyle = color;
           ctx.lineWidth = 1.6;

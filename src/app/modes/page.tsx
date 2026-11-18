@@ -141,8 +141,9 @@ export default function HarmonicModesPage() {
                   <div className="relative aspect-square w-full">
                     <ModeThumb m={mode.m} n={mode.n} />
                     {aiPickId === mode.id && (
-                      <span className="absolute top-1.5 left-1.5 text-[9px] font-extrabold px-2 py-0.5 rounded-full brand-gradient text-white shadow">
-                        ✨ AI PICK
+                      <span className="absolute top-1.5 left-1.5 text-[9px] font-extrabold px-2 py-0.5 rounded-full brand-gradient text-white shadow flex items-center gap-1">
+                        <Sparkles className="w-2.5 h-2.5" />
+                        AI PICK
                       </span>
                     )}
                     {isSelected && (
