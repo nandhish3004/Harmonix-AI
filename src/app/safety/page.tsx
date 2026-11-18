@@ -272,7 +272,7 @@ export default function ComponentSafetyPage() {
     setStandoffs((prev) => [...prev, { id: `ai-pin-${Date.now()}`, x: bestX, y: bestY }]);
   };
 
-  // 🤖 AUTOMATION: once guide closes, if any part sits in a danger zone, AI places a support screw by itself
+  // Automation: once guide closes, if any part sits in a danger zone, AI places a support screw by itself
   const [guideOpen, setGuideOpen] = useState<boolean>(true);
   const [aiNote, setAiNote] = useState<string | null>(null);
   const autoFixRef = useRef<() => void>(() => {});

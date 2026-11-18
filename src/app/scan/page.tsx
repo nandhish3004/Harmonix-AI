@@ -45,6 +45,7 @@ export default function WorkpieceScanPage() {
     startVideoTracking,
     setAutoTracking,
     detectOnce,
+    detectInRoi,
     setCornersFromAi,
     getLatestCorners,
     processImageFile,
@@ -125,7 +126,7 @@ export default function WorkpieceScanPage() {
     }
   }, [startVideoTracking]);
 
-  // 🤖 AUTOMATION 1: if there's no camera/photo after 4s, load a sample board so users never get stuck
+  // Automation 1: if there's no camera/photo after 4s, load a sample board so users never get stuck
   const userTouchedRef = useRef<boolean>(false);
   useEffect(() => {
     const t = setTimeout(() => {
@@ -138,7 +139,7 @@ export default function WorkpieceScanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraActive, uploadedImageUrl, guideOpen]);
 
-  // 🤖 AUTOMATION 0: once the guide is closed and the camera/photo is ready, AI detects the board by itself
+  // Automation 0: once the guide is closed and the camera/photo is ready, AI detects the board by itself
   useEffect(() => {
     if (guideOpen || !(cameraActive || uploadedImageUrl)) return;
     const t = setTimeout(() => {
@@ -150,12 +151,12 @@ export default function WorkpieceScanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guideOpen, cameraActive, uploadedImageUrl]);
 
-  // 🤖 Autopilot: once locked, continue to the next screen automatically
+  // Autopilot: once locked, continue to the next screen automatically
   useAutoAdvance(isLocked && !guideOpen, 2200, () => handleConfirmAndProceed());
 
-  // 🤖 AUTOMATION 2b: for photos/sample boards, lock automatically once confidence is good
+  // Automation 2b: for photos/sample boards, lock automatically once confidence is good
   useEffect(() => {
-    if (!uploadedImageUrl || isLocked || edgeConfidence < 60) return;
+    if (!uploadedImageUrl || isLocked || edgeConfidence < 75) return;
     const t = setTimeout(() => {
       lockBoundary();
       setScanMessage("AI outlined your board. Tap Continue — or Unlock to adjust.");
@@ -164,11 +165,21 @@ export default function WorkpieceScanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadedImageUrl, edgeConfidence, isLocked]);
 
-  // 🤖 AUTOMATION 2: auto-lock the outline once the AI detection stays stable for ~1 second
+  // Automation 2: auto-lock only when confidence >= 80, opposite sides are parallel (<22% skew), and quad stays steady
   const lastPolyRef = useRef<{ x: number; y: number }[] | null>(null);
   const stableCountRef = useRef<number>(0);
   useEffect(() => {
-    if (isLocked || edgeConfidence < 60 || activePinIndex !== null) {
+    const topW = Math.hypot(polygonCoords[1].x - polygonCoords[0].x, polygonCoords[1].y - polygonCoords[0].y);
+    const botW = Math.hypot(polygonCoords[2].x - polygonCoords[3].x, polygonCoords[2].y - polygonCoords[3].y);
+    const leftH = Math.hypot(polygonCoords[3].x - polygonCoords[0].x, polygonCoords[3].y - polygonCoords[0].y);
+    const rightH = Math.hypot(polygonCoords[2].x - polygonCoords[1].x, polygonCoords[2].y - polygonCoords[1].y);
+    const parallelOk =
+      Math.max(topW, botW) > 10 &&
+      Math.max(leftH, rightH) > 10 &&
+      Math.abs(topW - botW) / Math.max(topW, botW) < 0.22 &&
+      Math.abs(leftH - rightH) / Math.max(leftH, rightH) < 0.22;
+
+    if (isLocked || edgeConfidence < 80 || !parallelOk || activePinIndex !== null) {
       stableCountRef.current = 0;
       lastPolyRef.current = polygonCoords;
       return;
@@ -182,7 +193,7 @@ export default function WorkpieceScanPage() {
       stableCountRef.current = maxDelta < 4 ? stableCountRef.current + 1 : 0;
     }
     lastPolyRef.current = polygonCoords;
-    if (stableCountRef.current >= 14) {
+    if (stableCountRef.current >= 18) {
       lockBoundary();
       stableCountRef.current = 0;
       setScanMessage("AI locked onto your board automatically. Tap Continue!");
@@ -265,7 +276,22 @@ export default function WorkpieceScanPage() {
               sy = (sh - cropH) / 2;
             }
             sCtx.drawImage(src, sx, sy, cropW, cropH, 0, 0, cw * S, ch * S);
-            const fullBlob = await new Promise<Blob | null>((r) => snap.toBlob(r, "image/jpeg", 0.8));
+
+            // Compact <=256x256 full-frame blob for fast Hugging Face YOLOS-Tiny inference
+            const fullScale = Math.min(1, 256 / Math.max(cw, ch));
+            const fullCanvas = document.createElement("canvas");
+            fullCanvas.width = Math.max(64, Math.round(cw * fullScale));
+            fullCanvas.height = Math.max(64, Math.round(ch * fullScale));
+            const fullCtx = fullCanvas.getContext("2d");
+            let fullBlob: Blob | null = null;
+            if (fullCtx) {
+              fullCtx.drawImage(snap, 0, 0, cw * S, ch * S, 0, 0, fullCanvas.width, fullCanvas.height);
+              fullBlob = await new Promise<Blob | null>((r) =>
+                fullCanvas.toBlob(r, "image/jpeg", 0.8)
+              );
+            } else {
+              fullBlob = await new Promise<Blob | null>((r) => snap.toBlob(r, "image/jpeg", 0.8));
+            }
 
             let cropBlob: Blob | undefined;
             if (snappedCorners && snappedCorners.length === 4) {
@@ -308,12 +334,30 @@ export default function WorkpieceScanPage() {
                   localStorage.setItem("harmonix_hf_material", det.materialId);
                   localStorage.setItem("harmonix_hf_material_label", det.label);
                 }
-                if (!snapped) {
+                if (det.boxNorm) {
+                  const roiSnapped = detectInRoi(det.boxNorm);
+                  if (!roiSnapped) {
+                    const x0 = Math.max(8, Math.round(det.boxNorm.xmin * cw));
+                    const y0 = Math.max(8, Math.round(det.boxNorm.ymin * ch));
+                    const x1 = Math.min(cw - 8, Math.round(det.boxNorm.xmax * cw));
+                    const y1 = Math.min(ch - 8, Math.round(det.boxNorm.ymax * ch));
+                    if (x1 - x0 > 32 && y1 - y0 > 32) {
+                      setCornersFromAi([
+                        { x: x0, y: y0, label: "P1" },
+                        { x: x1, y: y0, label: "P2" },
+                        { x: x1, y: y1, label: "P3" },
+                        { x: x0, y: y1, label: "P4" },
+                      ]);
+                    }
+                  }
+                } else if (!snapped) {
                   if (det.box) {
-                    const x0 = Math.max(8, Math.round(det.box.xmin / S));
-                    const y0 = Math.max(8, Math.round(det.box.ymin / S));
-                    const x1 = Math.min(cw - 8, Math.round(det.box.xmax / S));
-                    const y1 = Math.min(ch - 8, Math.round(det.box.ymax / S));
+                    const kx = cw / fullCanvas.width;
+                    const ky = ch / fullCanvas.height;
+                    const x0 = Math.max(8, Math.round(det.box.xmin * kx));
+                    const y0 = Math.max(8, Math.round(det.box.ymin * ky));
+                    const x1 = Math.min(cw - 8, Math.round(det.box.xmax * kx));
+                    const y1 = Math.min(ch - 8, Math.round(det.box.ymax * ky));
                     if (x1 - x0 > 40 && y1 - y0 > 40) {
                       setCornersFromAi([
                         { x: x0, y: y0, label: "P1" },

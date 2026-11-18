@@ -113,7 +113,7 @@ export default function MaterialSelectionPage() {
       const a = Number(localStorage.getItem("harmonix_plate_area"));
       if (Number.isFinite(a) && a > 0) setArea(a);
 
-      // 🤖 AI material guess: Hugging Face label first, otherwise colour analysis of the scanned board
+      // AI material guess: Hugging Face label first, otherwise colour analysis of the scanned board
       const hf = localStorage.getItem("harmonix_hf_material");
       const hfLabel = localStorage.getItem("harmonix_hf_material_label");
       const applyGuess = (id: string, reason: string) => {
@@ -185,7 +185,7 @@ export default function MaterialSelectionPage() {
     router.push("/viewport");
   };
 
-  // 🤖 Autopilot: confirm the AI's pick automatically after a short pause
+  // Autopilot: confirm the AI's pick automatically after a short pause
   useAutoAdvance(aiReady, 3200, () => handleConfirm());
 
   return (

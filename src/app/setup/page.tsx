@@ -40,7 +40,7 @@ export default function SetupCalibrationPage() {
   const [guideOpen, setGuideOpen] = useState<boolean>(true);
   const { enabled: autopilotOn, start: startAutopilot } = useAutopilot();
 
-  // 🤖 Autopilot: once sensors are checked, go to the scanner automatically
+  // Autopilot: once sensors are checked, go to the scanner automatically
   useAutoAdvance(!isCalibrating && !guideOpen, 2500);
 
   const micStreamRef = useRef<MediaStream | null>(null);

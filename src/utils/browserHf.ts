@@ -25,6 +25,26 @@ const PHONE_KEYWORDS = [
   "pay-phone",
 ];
 
+const EXCLUDED_ROOM_CLASSES = new Set([
+  "person",
+  "chair",
+  "couch",
+  "bed",
+  "dining table",
+  "tv",
+  "potted plant",
+]);
+
+function formatDetectedLabel(label: string): string {
+  const l = label.toLowerCase();
+  if (l === "cell phone") return "Smartphone / Polymer-Alloy Chassis";
+  if (l === "book") return "Wood / Composite Board";
+  if (l === "laptop") return "Laptop PCB / Alloy Chassis";
+  if (l === "remote") return "Handheld FR-4 Enclosure";
+  if (l === "keyboard") return "Mechanical PCB Assembly";
+  return label;
+}
+
 const PCB_ELECTRONICS_KEYWORDS = [
   "notebook",
   "laptop",
@@ -293,6 +313,8 @@ function emitProgress(pct: number | null, label?: string) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+let objDetectPipePromise: Promise<any> | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let visionPipePromise: Promise<any> | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let audioPipePromise: Promise<any> | null = null;
@@ -304,27 +326,70 @@ async function loadTransformersEnv() {
   if (mod.env.backends?.onnx?.wasm) {
     mod.env.backends.onnx.wasm.proxy = true;
   }
-  return mod;
+  const hasWebGpu = typeof navigator !== "undefined" && "gpu" in navigator;
+  const preferredDevice: "webgpu" | "wasm" = hasWebGpu ? "webgpu" : "wasm";
+  return { mod, preferredDevice };
+}
+
+async function createOnnxPipeline<T extends "object-detection" | "image-classification" | "audio-classification">(
+  task: T,
+  modelId: string,
+  progressLabel: string,
+  readyLabel: string
+) {
+  const { mod, preferredDevice } = await loadTransformersEnv();
+  emitProgress(5, progressLabel);
+  const onProgress = (info: { status?: string; progress?: number }) => {
+    if (info?.status === "progress" && typeof info.progress === "number") {
+      emitProgress(Math.round(info.progress), progressLabel);
+    } else if (info?.status === "ready") {
+      emitProgress(null, readyLabel);
+    }
+  };
+  try {
+    const pipe = await mod.pipeline(task, modelId, {
+      device: preferredDevice,
+      dtype: "q8",
+      progress_callback: onProgress,
+    });
+    emitProgress(null, readyLabel);
+    return pipe;
+  } catch {
+    // Fallback cleanly to WASM if WebGPU backend is unavailable on device
+    const pipe = await mod.pipeline(task, modelId, {
+      device: "wasm",
+      dtype: "q8",
+      progress_callback: onProgress,
+    });
+    emitProgress(null, readyLabel);
+    return pipe;
+  }
+}
+
+async function getObjectDetectionPipeline() {
+  if (!objDetectPipePromise) {
+    objDetectPipePromise = createOnnxPipeline(
+      "object-detection",
+      "Xenova/yolos-tiny",
+      "Loading YOLOS object detector",
+      "YOLOS ready"
+    ).catch((err) => {
+      objDetectPipePromise = null;
+      emitProgress(null);
+      throw err;
+    });
+  }
+  return objDetectPipePromise;
 }
 
 async function getVisionPipeline() {
   if (!visionPipePromise) {
-    visionPipePromise = (async () => {
-      const { pipeline } = await loadTransformersEnv();
-      emitProgress(5, "Loading MobileViT vision model");
-      const pipe = await pipeline("image-classification", "Xenova/mobilevit-small", {
-        dtype: "q8",
-        progress_callback: (info: { status?: string; progress?: number }) => {
-          if (info?.status === "progress" && typeof info.progress === "number") {
-            emitProgress(Math.round(info.progress), "Loading MobileViT vision model");
-          } else if (info?.status === "ready") {
-            emitProgress(null, "MobileViT ready");
-          }
-        },
-      });
-      emitProgress(null, "MobileViT ready");
-      return pipe;
-    })().catch((err) => {
+    visionPipePromise = createOnnxPipeline(
+      "image-classification",
+      "Xenova/mobilevit-small",
+      "Loading MobileViT vision model",
+      "MobileViT ready"
+    ).catch((err) => {
       visionPipePromise = null;
       emitProgress(null);
       throw err;
@@ -335,26 +400,12 @@ async function getVisionPipeline() {
 
 async function getAudioPipeline() {
   if (!audioPipePromise) {
-    audioPipePromise = (async () => {
-      const { pipeline } = await loadTransformersEnv();
-      emitProgress(5, "Loading AST audio model");
-      const pipe = await pipeline(
-        "audio-classification",
-        "Xenova/ast-finetuned-audioset-10-10-0.4593",
-        {
-          dtype: "q8",
-          progress_callback: (info: { status?: string; progress?: number }) => {
-            if (info?.status === "progress" && typeof info.progress === "number") {
-              emitProgress(Math.round(info.progress), "Loading AST audio model");
-            } else if (info?.status === "ready") {
-              emitProgress(null, "AST audio model ready");
-            }
-          },
-        }
-      );
-      emitProgress(null, "AST audio model ready");
-      return pipe;
-    })().catch((err) => {
+    audioPipePromise = createOnnxPipeline(
+      "audio-classification",
+      "Xenova/ast-finetuned-audioset-10-10-0.4593",
+      "Loading AST audio model",
+      "AST audio model ready"
+    ).catch((err) => {
       audioPipePromise = null;
       emitProgress(null);
       throw err;
@@ -365,7 +416,93 @@ async function getAudioPipeline() {
 
 export function preloadVisionModels(): void {
   if (typeof window === "undefined") return;
-  void getVisionPipeline().catch(() => {});
+  // Sequential preload keeps worker + network init smooth
+  void getVisionPipeline()
+    .catch(() => {})
+    .finally(() => {
+      void getObjectDetectionPipeline().catch(() => {});
+    });
+}
+
+export interface BrowserObjectDetection {
+  model: string;
+  label: string;
+  score: number;
+  boxNorm: { xmin: number; ymin: number; xmax: number; ymax: number };
+}
+
+export async function detectObjectInBrowser(
+  imageBlob: Blob,
+  timeoutMs = 1800
+): Promise<BrowserObjectDetection | null> {
+  if (typeof window === "undefined") return null;
+  let objectUrl: string | null = null;
+  try {
+    return await withTimeout(
+      (async () => {
+        const pipe = await getObjectDetectionPipeline();
+        // Ensure compact <=256x256 input for low-latency ONNX inference
+        let inputBlob = imageBlob;
+        if (typeof createImageBitmap === "function") {
+          try {
+            const bmp = await createImageBitmap(imageBlob);
+            if (bmp.width > 256 || bmp.height > 256) {
+              const s = Math.min(256 / bmp.width, 256 / bmp.height);
+              const c = document.createElement("canvas");
+              c.width = Math.max(32, Math.round(bmp.width * s));
+              c.height = Math.max(32, Math.round(bmp.height * s));
+              const cCtx = c.getContext("2d");
+              if (cCtx) {
+                cCtx.drawImage(bmp, 0, 0, c.width, c.height);
+                const small = await new Promise<Blob | null>((r) => c.toBlob(r, "image/jpeg", 0.8));
+                if (small) inputBlob = small;
+              }
+            }
+            bmp.close();
+          } catch {
+            // use original blob
+          }
+        }
+        objectUrl = URL.createObjectURL(inputBlob);
+        const results = (await pipe(objectUrl, {
+          threshold: 0.14,
+          percentage: true,
+        })) as {
+          label: string;
+          score: number;
+          box: { xmin: number; ymin: number; xmax: number; ymax: number };
+        }[];
+        if (!Array.isArray(results) || results.length === 0) return null;
+        const candidates = results.filter(
+          (r) =>
+            !EXCLUDED_ROOM_CLASSES.has(r.label.toLowerCase()) &&
+            r.box &&
+            r.box.xmax - r.box.xmin > 0.04 &&
+            r.box.ymax - r.box.ymin > 0.04
+        );
+        if (candidates.length === 0) return null;
+        const best = candidates.sort((a, b) => b.score - a.score)[0];
+        if (!best || !best.box) return null;
+        const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+        return {
+          model: "Xenova/yolos-tiny (ONNX)",
+          label: formatDetectedLabel(best.label),
+          score: best.score,
+          boxNorm: {
+            xmin: clamp01(best.box.xmin),
+            ymin: clamp01(best.box.ymin),
+            xmax: clamp01(best.box.xmax),
+            ymax: clamp01(best.box.ymax),
+          },
+        };
+      })(),
+      timeoutMs
+    );
+  } catch {
+    return null;
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+  }
 }
 
 export interface BrowserVisionClassification {
@@ -377,7 +514,7 @@ export interface BrowserVisionClassification {
 
 export async function classifyBoardInBrowser(
   imageBlob: Blob,
-  timeoutMs = 900
+  timeoutMs = 1100
 ): Promise<BrowserVisionClassification | null> {
   if (typeof window === "undefined") return null;
   let objectUrl: string | null = null;

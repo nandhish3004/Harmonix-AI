@@ -17,6 +17,13 @@ export interface TrackState {
   rad: number;
 }
 
+export interface NormalizedBox {
+  xmin: number;
+  ymin: number;
+  xmax: number;
+  ymax: number;
+}
+
 export interface BoundaryDetectionState {
   polygonCoords: Point2D[];
   isLocked: boolean;
@@ -36,6 +43,7 @@ export interface BoundaryDetectionState {
   stopVideoTracking: () => void;
   setAutoTracking: (enabled: boolean) => void;
   detectOnce: () => boolean;
+  detectInRoi: (boxNorm: NormalizedBox) => boolean;
   setCornersFromAi: (corners: Point2D[]) => void;
   getLatestCorners: () => Point2D[];
   processImageFile: (file: File) => void;
@@ -89,7 +97,8 @@ export function detectQuadFromSource(
   targetHeight: number,
   overlayCanvas: HTMLCanvasElement | null,
   workCanvas: HTMLCanvasElement,
-  prevTrack: TrackState | null = null
+  prevTrack: TrackState | null = null,
+  roiNorm: NormalizedBox | null = null
 ): { corners: Point2D[] | null; confidence: number; track: TrackState | null } {
   if (srcWidth === 0 || srcHeight === 0 || targetWidth === 0 || targetHeight === 0) {
     return { corners: null, confidence: 0, track: null };
@@ -208,46 +217,106 @@ export function detectQuadFromSource(
     }
   }
 
-  // 3. Pure Sobel Edge Magnitude (used strictly as barrier — never mixed with colorDist)
+  // 3. 3-Channel Color-Sobel Edge Magnitude + 3x3 Morphological Dilation Edge Barrier
   const mag = new Float32Array(total);
   let sumMag = 0;
   const margin = 4;
 
+  const sobelAt = (buf: Float32Array, idx: number): number => {
+    const gx =
+      -buf[idx - procW - 1] + buf[idx - procW + 1] -
+      2 * buf[idx - 1] + 2 * buf[idx + 1] -
+      buf[idx + procW - 1] + buf[idx + procW + 1];
+    const gy =
+      -buf[idx - procW - 1] - 2 * buf[idx - procW] - buf[idx - procW + 1] +
+      buf[idx + procW - 1] + 2 * buf[idx + procW] + buf[idx + procW + 1];
+    return Math.abs(gx) + Math.abs(gy);
+  };
+
   for (let y = margin; y < procH - margin; y++) {
     for (let x = margin; x < procW - margin; x++) {
       const i = y * procW + x;
-      const gx =
-        -blurred[i - procW - 1] + blurred[i - procW + 1] -
-        2 * blurred[i - 1] + 2 * blurred[i + 1] -
-        blurred[i + procW - 1] + blurred[i + procW + 1];
-      const gy =
-        -blurred[i - procW - 1] - 2 * blurred[i - procW] - blurred[i - procW + 1] +
-        blurred[i + procW - 1] + 2 * blurred[i + procW] + blurred[i + procW + 1];
-      const m = Math.abs(gx) + Math.abs(gy);
+      const mGray = sobelAt(blurred, i);
+      const mR = sobelAt(blurR, i);
+      const mG = sobelAt(blurG, i);
+      const mB = sobelAt(blurB, i);
+      const m = Math.max(mGray, mR, mG, mB);
       mag[i] = m;
       sumMag += m;
     }
   }
 
   const meanMag = sumMag / total;
-  const edgeBarrier = Math.max(95, meanMag * 3.1);
+  const edgeBarrier = Math.max(58, meanMag * 2.2);
 
-  // 4. Priority temporal seeding from prevTrack + 42 interior grid seeds
-  const seedCoords: [number, number][] = [];
-  if (prevTrack) {
-    const tcx = Math.round(prevTrack.cx);
-    const tcy = Math.round(prevTrack.cy);
-    seedCoords.push(
-      [tcx, tcy],
-      [tcx - 6, tcy - 6],
-      [tcx + 6, tcy - 6],
-      [tcx - 6, tcy + 6],
-      [tcx + 6, tcy + 6]
-    );
+  // Build thresholded edge mask + 3x3 morphological dilation to seal 1-2px perimeter gaps
+  const rawEdgeMask = new Uint8Array(total);
+  const edgeBarrierMask = new Uint8Array(total);
+  for (let y = margin; y < procH - margin; y++) {
+    for (let x = margin; x < procW - margin; x++) {
+      const i = y * procW + x;
+      if (mag[i] >= edgeBarrier) {
+        rawEdgeMask[i] = 1;
+      }
+    }
   }
-  for (const u of [0.18, 0.3, 0.42, 0.5, 0.58, 0.7, 0.82]) {
-    for (const v of [0.2, 0.32, 0.44, 0.56, 0.68, 0.8]) {
-      seedCoords.push([Math.round(u * procW), Math.round(v * procH)]);
+  for (let y = margin; y < procH - margin; y++) {
+    for (let x = margin; x < procW - margin; x++) {
+      const i = y * procW + x;
+      if (!rawEdgeMask[i]) continue;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        for (let dx = -1; dx <= 1; dx++) {
+          edgeBarrierMask[ny * procW + (x + dx)] = 1;
+        }
+      }
+    }
+  }
+
+  // Optional normalized ROI clamping (when guided by Hugging Face object detector)
+  let roiX0 = 2;
+  let roiY0 = 2;
+  let roiX1 = procW - 3;
+  let roiY1 = procH - 3;
+  if (roiNorm) {
+    const padX = (roiNorm.xmax - roiNorm.xmin) * 0.08;
+    const padY = (roiNorm.ymax - roiNorm.ymin) * 0.08;
+    roiX0 = Math.max(2, Math.floor((roiNorm.xmin - padX) * procW));
+    roiY0 = Math.max(2, Math.floor((roiNorm.ymin - padY) * procH));
+    roiX1 = Math.min(procW - 3, Math.ceil((roiNorm.xmax + padX) * procW));
+    roiY1 = Math.min(procH - 3, Math.ceil((roiNorm.ymax + padY) * procH));
+  }
+  const roiBoxArea = Math.max(1, (roiX1 - roiX0 + 1) * (roiY1 - roiY0 + 1));
+
+  // 4. Seeds: strict interior grid inside roiNorm if provided, else prevTrack + 42 grid seeds
+  const seedCoords: [number, number][] = [];
+  if (roiNorm) {
+    const rwNorm = roiNorm.xmax - roiNorm.xmin;
+    const rhNorm = roiNorm.ymax - roiNorm.ymin;
+    for (const u of [0.22, 0.36, 0.5, 0.64, 0.78]) {
+      for (const v of [0.22, 0.36, 0.5, 0.64, 0.78]) {
+        seedCoords.push([
+          Math.round((roiNorm.xmin + u * rwNorm) * procW),
+          Math.round((roiNorm.ymin + v * rhNorm) * procH),
+        ]);
+      }
+    }
+  } else {
+    if (prevTrack) {
+      const tcx = Math.round(prevTrack.cx);
+      const tcy = Math.round(prevTrack.cy);
+      seedCoords.push(
+        [tcx, tcy],
+        [tcx - 6, tcy - 6],
+        [tcx + 6, tcy - 6],
+        [tcx - 6, tcy + 6],
+        [tcx + 6, tcy + 6]
+      );
+    }
+    for (const u of [0.18, 0.3, 0.42, 0.5, 0.58, 0.7, 0.82]) {
+      for (const v of [0.2, 0.32, 0.44, 0.56, 0.68, 0.8]) {
+        seedCoords.push([Math.round(u * procW), Math.round(v * procH)]);
+      }
     }
   }
 
@@ -262,12 +331,21 @@ export function detectQuadFromSource(
   let bestProcCorners: { x: number; y: number }[] | null = null;
   let bestRegionPixels: number[] = [];
   let bestFillRatio = 0;
+  let bestEdgeSupport = 0;
   let bestTrack: TrackState | null = null;
 
+  const sampleMag = (px: number, py: number): number => {
+    const ix = Math.round(px);
+    const iy = Math.round(py);
+    if (ix < 2 || ix >= procW - 2 || iy < 2 || iy >= procH - 2) return 0;
+    return mag[iy * procW + ix];
+  };
+
   for (const [sx, sy] of seedCoords) {
+    if (sx < roiX0 || sx > roiX1 || sy < roiY0 || sy > roiY1) continue;
     if (sx < margin || sx >= procW - margin || sy < margin || sy >= procH - margin) continue;
     const startIdx = sy * procW + sx;
-    if (skinMask[startIdx] || visitedGlobal[startIdx]) continue;
+    if (skinMask[startIdx] || edgeBarrierMask[startIdx] || visitedGlobal[startIdx]) continue;
 
     const sr = blurR[startIdx];
     const sg = blurG[startIdx];
@@ -297,15 +375,15 @@ export function detectQuadFromSource(
       if (py < minY) minY = py;
       if (py > maxY) maxY = py;
 
-      // 4-connected growth bounded by seed similarity and step-edge barriers
+      // 4-connected growth bounded by seed similarity, ROI bounds, and dilated color-Sobel barrier
       const neighbors = [
-        px > 2 ? idx - 1 : -1,
-        px < procW - 3 ? idx + 1 : -1,
-        py > 2 ? idx - procW : -1,
-        py < procH - 3 ? idx + procW : -1,
+        px > roiX0 ? idx - 1 : -1,
+        px < roiX1 ? idx + 1 : -1,
+        py > roiY0 ? idx - procW : -1,
+        py < roiY1 ? idx + procW : -1,
       ];
       for (const nIdx of neighbors) {
-        if (nIdx < 0 || visitedLocal[nIdx] || skinMask[nIdx]) continue;
+        if (nIdx < 0 || visitedLocal[nIdx] || skinMask[nIdx] || edgeBarrierMask[nIdx]) continue;
         const seedDiff =
           Math.abs(blurR[nIdx] - sr) +
           Math.abs(blurG[nIdx] - sg) +
@@ -316,7 +394,7 @@ export function detectQuadFromSource(
           Math.abs(blurR[nIdx] - blurR[idx]) +
           Math.abs(blurG[nIdx] - blurG[idx]) +
           Math.abs(blurB[nIdx] - blurB[idx]);
-        if (stepDiff >= 28 || mag[nIdx] >= edgeBarrier) continue;
+        if (stepDiff >= 28) continue;
 
         visitedLocal[nIdx] = 1;
         visitedGlobal[nIdx] = 1;
@@ -325,7 +403,8 @@ export function detectQuadFromSource(
     }
 
     const areaCount = regionPixels.length;
-    if (areaCount < total * 0.035) continue;
+    const minAreaRequired = roiNorm ? Math.max(total * 0.015, roiBoxArea * 0.14) : total * 0.035;
+    if (areaCount < minAreaRequired) continue;
 
     // Reject regions touching 2 or more outer borders of the frame (walls, shirts, tables)
     let bordersTouched = 0;
@@ -333,7 +412,7 @@ export function detectQuadFromSource(
     if (maxX >= procW - 6) bordersTouched++;
     if (minY <= 5) bordersTouched++;
     if (maxY >= procH - 6) bordersTouched++;
-    if (bordersTouched >= 2) continue;
+    if (!roiNorm && bordersTouched >= 2) continue;
 
     // 5. Minimum-Area Oriented Bounding Box (OBB) Corner Reconstruction (occlusion-immune)
     const centroidX = sumX / areaCount;
@@ -425,17 +504,98 @@ export function detectQuadFromSource(
     const obbFillRatio = areaCount / obbBoxArea;
     if (obbFillRatio < 0.48) continue;
 
+    // 4-Side Directional Caliper Projection within +-6px band around u0, u1, v0, v1
+    const snapCaliperU = (baseU: number): number => {
+      let bestU = baseU;
+      let bestStrength = -1;
+      for (let du = -6; du <= 6; du++) {
+        const candU = baseU + du;
+        let sumStr = 0;
+        for (let s = 0; s < 16; s++) {
+          const v = v0 + (0.1 + (s / 15) * 0.8) * (v1 - v0);
+          const wx = centroidX + candU * optCos - v * optSin;
+          const wy = centroidY + candU * optSin + v * optCos;
+          sumStr += Math.min(sampleMag(wx, wy), edgeBarrier * 3.5);
+        }
+        const avgStr = (sumStr / 16) * (1 - 0.02 * Math.abs(du));
+        if (avgStr > bestStrength) {
+          bestStrength = avgStr;
+          bestU = candU;
+        }
+      }
+      return bestStrength >= meanMag * 1.1 ? bestU : baseU;
+    };
+
+    const snapCaliperV = (baseV: number): number => {
+      let bestV = baseV;
+      let bestStrength = -1;
+      for (let dv = -6; dv <= 6; dv++) {
+        const candV = baseV + dv;
+        let sumStr = 0;
+        for (let s = 0; s < 16; s++) {
+          const u = u0 + (0.1 + (s / 15) * 0.8) * (u1 - u0);
+          const wx = centroidX + u * optCos - candV * optSin;
+          const wy = centroidY + u * optSin + candV * optCos;
+          sumStr += Math.min(sampleMag(wx, wy), edgeBarrier * 3.5);
+        }
+        const avgStr = (sumStr / 16) * (1 - 0.02 * Math.abs(dv));
+        if (avgStr > bestStrength) {
+          bestStrength = avgStr;
+          bestV = candV;
+        }
+      }
+      return bestStrength >= meanMag * 1.1 ? bestV : baseV;
+    };
+
+    let u0Snap = snapCaliperU(u0);
+    let u1Snap = snapCaliperU(u1);
+    let v0Snap = snapCaliperV(v0);
+    let v1Snap = snapCaliperV(v1);
+    if (u1Snap - u0Snap < 10) {
+      u0Snap = u0;
+      u1Snap = u1;
+    }
+    if (v1Snap - v0Snap < 10) {
+      v0Snap = v0;
+      v1Snap = v1;
+    }
+
     const backProject = (u: number, v: number) => ({
       x: Math.max(3, Math.min(procW - 4, centroidX + u * optCos - v * optSin)),
       y: Math.max(3, Math.min(procH - 4, centroidY + u * optSin + v * optCos)),
     });
 
     const rawQuad = [
-      backProject(u0, v0),
-      backProject(u1, v0),
-      backProject(u1, v1),
-      backProject(u0, v1),
+      backProject(u0Snap, v0Snap),
+      backProject(u1Snap, v0Snap),
+      backProject(u1Snap, v1Snap),
+      backProject(u0Snap, v1Snap),
     ];
+
+    // Perimeter Edge-Support Verification along all 4 reconstructed edges
+    const edgeThreshold = meanMag * 1.15;
+    let supportedSamples = 0;
+    const samplesPerSide = 16;
+    for (let side = 0; side < 4; side++) {
+      const a = rawQuad[side];
+      const b = rawQuad[(side + 1) % 4];
+      const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      const nx = -(b.y - a.y) / len;
+      const ny = (b.x - a.x) / len;
+      for (let s = 0; s < samplesPerSide; s++) {
+        const t = 0.08 + (s / (samplesPerSide - 1)) * 0.84;
+        const px = a.x + (b.x - a.x) * t;
+        const py = a.y + (b.y - a.y) * t;
+        const peakEdge = Math.max(
+          sampleMag(px, py),
+          sampleMag(px + nx, py + ny),
+          sampleMag(px - nx, py - ny)
+        );
+        if (peakEdge >= edgeThreshold) supportedSamples++;
+      }
+    }
+    const edgeSupportRatio = supportedSamples / (4 * samplesPerSide);
+    if (edgeSupportRatio < 0.3) continue;
 
     const bgDiff = Math.abs(sr - bgR) + Math.abs(sg - bgG) + Math.abs(sb - bgB);
     const distToCenter = Math.hypot(centroidX - cxFrame, centroidY - cyFrame);
@@ -443,6 +603,7 @@ export function detectQuadFromSource(
     let score =
       areaCount *
       Math.pow(Math.min(1, obbFillRatio), 1.5) *
+      Math.pow(edgeSupportRatio, 2.2) *
       centrality *
       (1 + Math.min(1.5, bgDiff / 80));
     if (bordersTouched === 1) score *= 0.2;
@@ -452,6 +613,7 @@ export function detectQuadFromSource(
       bestScore = score;
       bestRegionPixels = regionPixels;
       bestFillRatio = Math.min(1, obbFillRatio);
+      bestEdgeSupport = edgeSupportRatio;
       bestProcCorners = rawQuad;
       bestTrack = {
         cx: centroidX,
@@ -508,7 +670,8 @@ export function detectQuadFromSource(
     return { corners: null, confidence: 28, track: null };
   }
 
-  const confidence = Math.min(99, Math.round(68 + bestFillRatio * 30));
+  const quality = Math.min(1, 0.55 * bestFillRatio + 0.45 * bestEdgeSupport);
+  const confidence = Math.min(99, Math.round(62 + quality * 36));
   return { corners: bestCorners, confidence, track: bestTrack };
 }
 
@@ -667,6 +830,61 @@ export function useBoundaryDetection(): BoundaryDetectionState {
     }
     return false;
   }, [getWorkCanvas]);
+
+  const detectInRoi = useCallback(
+    (boxNorm: NormalizedBox): boolean => {
+      const workCanvas = getWorkCanvas();
+      const container = containerRef.current;
+      if (!workCanvas || !container) return false;
+      const rect = container.getBoundingClientRect();
+      const targetW = rect.width || 360;
+      const targetH = rect.height || 380;
+
+      let result: { corners: Point2D[] | null; confidence: number; track: TrackState | null } = {
+        corners: null,
+        confidence: 0,
+        track: null,
+      };
+
+      if (uploadedImgRef.current && uploadedImgRef.current.complete) {
+        result = detectQuadFromSource(
+          uploadedImgRef.current,
+          uploadedImgRef.current.naturalWidth,
+          uploadedImgRef.current.naturalHeight,
+          targetW,
+          targetH,
+          overlayCanvasRef.current,
+          workCanvas,
+          null,
+          boxNorm
+        );
+      } else if (videoRef.current && videoRef.current.readyState >= 2) {
+        result = detectQuadFromSource(
+          videoRef.current,
+          videoRef.current.videoWidth,
+          videoRef.current.videoHeight,
+          targetW,
+          targetH,
+          overlayCanvasRef.current,
+          workCanvas,
+          null,
+          boxNorm
+        );
+      }
+
+      if (result.corners) {
+        setEdgeConfidence(result.confidence);
+        if (result.track) trackStateRef.current = result.track;
+        latestCornersRef.current = result.corners;
+        targetCornersRef.current = result.corners;
+        smoothCornersRef.current = result.corners.map((c) => ({ x: c.x, y: c.y }));
+        setPolygonCoords(result.corners);
+        return true;
+      }
+      return false;
+    },
+    [getWorkCanvas]
+  );
 
   const processImageFile = useCallback(
     (file: File) => {
@@ -838,6 +1056,7 @@ export function useBoundaryDetection(): BoundaryDetectionState {
     stopVideoTracking,
     setAutoTracking: setIsAutoTracking,
     detectOnce,
+    detectInRoi,
     setCornersFromAi,
     getLatestCorners,
     processImageFile,

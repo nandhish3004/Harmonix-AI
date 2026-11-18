@@ -256,7 +256,7 @@ export default function FindItsNotePage() {
     return () => clearTimeout(t);
   }, [guideOpen, runTapListen]);
 
-  // 🤖 Autopilot: move to Modes screen once tap analysis completes
+  // Autopilot: move to Modes screen once tap analysis completes
   useAutoAdvance(phase === "done" && !guideOpen, 2600, () => router.push("/modes"));
 
   const togglePlay = async () => {

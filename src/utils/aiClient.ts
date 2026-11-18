@@ -1,8 +1,12 @@
 /**
  * Client for Hugging Face Inference — checks once whether cloud HF_TOKEN is configured,
- * and otherwise skips dead network POSTs to run fast off-main-thread ONNX MobileViT + Spectral CV / AST.
+ * and otherwise skips dead network POSTs to run WebGPU/proxied ONNX YOLOS-Tiny + MobileViT + Spectral CV.
  */
-import { classifyAudioInBrowser, classifyBoardInBrowser } from "@/utils/browserHf";
+import {
+  classifyAudioInBrowser,
+  classifyBoardInBrowser,
+  detectObjectInBrowser,
+} from "@/utils/browserHf";
 
 export interface AiHealth {
   status: "online" | "offline";
@@ -52,7 +56,7 @@ export async function checkAiHealth(): Promise<AiHealth> {
     hfConfigured: true,
     mode: "browser-onnx",
     models: {
-      vision: "Xenova/mobilevit-small (ONNX)",
+      vision: "Xenova/mobilevit-small + yolos-tiny (ONNX)",
       audio: "Xenova/ast-finetuned-audioset (ONNX)",
     },
   };
@@ -63,6 +67,7 @@ export interface BoardDetection {
   label: string;
   score: number;
   box?: { xmin: number; ymin: number; xmax: number; ymax: number };
+  boxNorm?: { xmin: number; ymin: number; xmax: number; ymax: number };
   materialId: "fr4" | "al6061" | "steel" | "acrylic" | null;
 }
 
@@ -88,7 +93,7 @@ function materialFromLabel(label: string): BoardDetection["materialId"] {
   return null;
 }
 
-/** Fast board identification (Cloud OWL-ViT if HF_TOKEN set, else MobileViT-small + Spectral CV). */
+/** Fast parallel object-detection + MobileViT material ID (Cloud if HF_TOKEN set, else browser ONNX). */
 export async function detectBoardHF(
   fullImage: Blob,
   croppedImage?: Blob
@@ -120,11 +125,35 @@ export async function detectBoardHF(
         }
       }
     } catch {
-      // fallback to fast in-browser MobileViT + Spectral CV
+      // fallback to fast in-browser YOLOS-Tiny + MobileViT ONNX
     }
   }
 
-  const cls = await classifyBoardInBrowser(croppedImage ?? fullImage, 900);
+  const [obj, cls] = await Promise.all([
+    detectObjectInBrowser(fullImage, 1800),
+    classifyBoardInBrowser(croppedImage ?? fullImage, 1100),
+  ]);
+
+  if (obj && cls) {
+    return {
+      model: "Xenova/yolos-tiny + mobilevit-small (ONNX)",
+      label: obj.score >= 0.25 ? obj.label : cls.label,
+      score: Math.max(obj.score, cls.score),
+      boxNorm: obj.boxNorm,
+      materialId: obj.score >= 0.25 ? materialFromLabel(obj.label) ?? cls.materialId : cls.materialId,
+    };
+  }
+
+  if (obj) {
+    return {
+      model: obj.model,
+      label: obj.label,
+      score: obj.score,
+      boxNorm: obj.boxNorm,
+      materialId: materialFromLabel(obj.label),
+    };
+  }
+
   if (cls) {
     return {
       model: cls.model,

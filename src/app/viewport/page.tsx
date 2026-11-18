@@ -134,7 +134,7 @@ export default function ChladniViewportPage() {
     setLoaded(true);
   }, []);
 
-  // ✨ AI: sweep the spectrum and lock onto the board's natural resonance automatically
+  // AI: sweep the spectrum and lock onto the board's natural resonance automatically
   const findResonance = useCallback(() => {
     if (isFinding) return;
     setIsFinding(true);
@@ -182,7 +182,7 @@ export default function ChladniViewportPage() {
     return () => clearTimeout(t);
   }, [loaded, guideOpen, findResonance]);
 
-  // 🤖 Autopilot: move to Pitch Tuner after sweep completes
+  // Autopilot: move to Pitch Tuner after sweep completes
   useAutoAdvance(sweepDone && !guideOpen && !isFinding, 2800, () => router.push("/tuner"));
 
   // Live camera pass-through for AR
@@ -257,7 +257,7 @@ export default function ChladniViewportPage() {
     };
   }, []);
 
-  // 🌈 Meta-style Spatial AR hologram + shaded rotating 3D surface
+  // Spatial AR hologram + shaded rotating 3D surface
   useEffect(() => {
     if (viewMode === "2d" || !spatialCanvasRef.current) return;
     const canvas = spatialCanvasRef.current;

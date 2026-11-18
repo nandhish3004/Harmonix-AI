@@ -79,7 +79,7 @@ export default function HarmonicModesPage() {
     const computed = computeAllModes(mat, thick, geo.areaMm2, geo.aspectRatio, pins.length);
     setModes(computed);
 
-    // 🤖 AI auto-pick: the mode whose frequency is closest to the board's measured note
+    // AI auto-pick: the mode whose frequency is closest to the board's measured note
     let measured = 0;
     if (typeof window !== "undefined") {
       measured = Number(localStorage.getItem("harmonix_measured_freq")) || 0;
