@@ -20,6 +20,7 @@ import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
 import { useBoundaryDetection } from "@/hooks/useBoundaryDetection";
 import { detectBoardHF } from "@/utils/aiClient";
+import { preloadVisionModels } from "@/utils/browserHf";
 import { TestGuide } from "@/components/guide/TestGuide";
 import { useAutoAdvance } from "@/context/autopilot";
 import { speak } from "@/utils/voice";
@@ -44,6 +45,8 @@ export default function WorkpieceScanPage() {
     startVideoTracking,
     setAutoTracking,
     detectOnce,
+    setCornersFromAi,
+    getLatestCorners,
     processImageFile,
     clearUploadedImage,
     lockBoundary,
@@ -111,6 +114,10 @@ export default function WorkpieceScanPage() {
       // thumbnail is optional
     }
   };
+
+  useEffect(() => {
+    preloadVisionModels();
+  }, []);
 
   useEffect(() => {
     if (videoRef.current) {
@@ -206,14 +213,15 @@ export default function WorkpieceScanPage() {
     if (isLocked) unlockBoundary();
     setIsAiRunning(true);
     try {
-      // Step A: Instantaneous (<20ms) region-growing + Sobel barrier CV snap
+      // Step A: Instantaneous (<20ms) OBB + Region-Growing + Sobel barrier CV snap
       const snapped = detectOnce();
+      const snappedCorners = snapped ? getLatestCorners() : null;
       if (snapped) {
-        setAiEngine("Region-Growing + Sobel CV");
-        setScanMessage("Snapped P1–P4 to workpiece contour. Refining with Hugging Face…");
+        setAiEngine("OBB + Region-Growing CV");
+        setScanMessage("Snapped P1–P4 to workpiece contour. Identifying with Hugging Face…");
       }
 
-      // Step B: Fast Hugging Face detection / material ID (3.5s cap so UI never hangs)
+      // Step B: Fast Hugging Face detection on full frame + CLIP classification on cropped P1–P4 ROI
       if (containerRef.current && (cameraActive || uploadedImageUrl)) {
         const rect = containerRef.current.getBoundingClientRect();
         const cw = Math.round(rect.width) || 360;
@@ -257,27 +265,63 @@ export default function WorkpieceScanPage() {
               sy = (sh - cropH) / 2;
             }
             sCtx.drawImage(src, sx, sy, cropW, cropH, 0, 0, cw * S, ch * S);
-            const blob = await new Promise<Blob | null>((r) => snap.toBlob(r, "image/jpeg", 0.85));
-            if (blob) {
-              const det = await detectBoardHF(blob);
+            const fullBlob = await new Promise<Blob | null>((r) => snap.toBlob(r, "image/jpeg", 0.85));
+
+            let cropBlob: Blob | undefined;
+            if (snappedCorners && snappedCorners.length === 4) {
+              const xs = snappedCorners.map((p) => p.x);
+              const ys = snappedCorners.map((p) => p.y);
+              const minX = Math.min(...xs);
+              const maxX = Math.max(...xs);
+              const minY = Math.min(...ys);
+              const maxY = Math.max(...ys);
+              const bw = maxX - minX;
+              const bh = maxY - minY;
+              const padX = bw * 0.06;
+              const padY = bh * 0.06;
+              const rx = Math.max(0, Math.round((minX - padX) * S));
+              const ry = Math.max(0, Math.round((minY - padY) * S));
+              const rw = Math.min(cw * S - rx, Math.round((bw + 2 * padX) * S));
+              const rh = Math.min(ch * S - ry, Math.round((bh + 2 * padY) * S));
+              if (rw > 24 && rh > 24) {
+                const cropCanvas = document.createElement("canvas");
+                cropCanvas.width = rw;
+                cropCanvas.height = rh;
+                const cropCtx = cropCanvas.getContext("2d");
+                if (cropCtx) {
+                  cropCtx.drawImage(snap, rx, ry, rw, rh, 0, 0, rw, rh);
+                  const roi = await new Promise<Blob | null>((r) =>
+                    cropCanvas.toBlob(r, "image/jpeg", 0.88)
+                  );
+                  if (roi) cropBlob = roi;
+                }
+              }
+            }
+
+            if (fullBlob) {
+              const det = await detectBoardHF(fullBlob, cropBlob);
               if (det) {
                 if (typeof window !== "undefined" && det.materialId) {
                   localStorage.setItem("harmonix_hf_material", det.materialId);
                   localStorage.setItem("harmonix_hf_material_label", det.label);
                 }
-                if (det.box) {
-                  const x0 = Math.max(8, Math.round(det.box.xmin / S));
-                  const y0 = Math.max(8, Math.round(det.box.ymin / S));
-                  const x1 = Math.min(cw - 8, Math.round(det.box.xmax / S));
-                  const y1 = Math.min(ch - 8, Math.round(det.box.ymax / S));
-                  if (x1 - x0 > 40 && y1 - y0 > 40) {
-                    updateCornerPoint(0, x0, y0);
-                    updateCornerPoint(1, x1, y0);
-                    updateCornerPoint(2, x1, y1);
-                    updateCornerPoint(3, x0, y1);
+                if (!snapped) {
+                  if (det.box) {
+                    const x0 = Math.max(8, Math.round(det.box.xmin / S));
+                    const y0 = Math.max(8, Math.round(det.box.ymin / S));
+                    const x1 = Math.min(cw - 8, Math.round(det.box.xmax / S));
+                    const y1 = Math.min(ch - 8, Math.round(det.box.ymax / S));
+                    if (x1 - x0 > 40 && y1 - y0 > 40) {
+                      setCornersFromAi([
+                        { x: x0, y: y0, label: "P1" },
+                        { x: x1, y: y0, label: "P2" },
+                        { x: x1, y: y1, label: "P3" },
+                        { x: x0, y: y1, label: "P4" },
+                      ]);
+                    }
+                  } else {
+                    detectOnce();
                   }
-                } else {
-                  detectOnce();
                 }
                 setAiEngine(`Hugging Face · ${det.model.split("/").pop()}`);
                 setScanMessage(
@@ -291,12 +335,12 @@ export default function WorkpieceScanPage() {
           }
         }
       }
-      setAiEngine("Region-Growing + Sobel CV");
+      setAiEngine("OBB + Region-Growing CV");
 
       if (!snapped) {
         const found = detectOnce();
         if (found) {
-          setScanMessage("Region-growing CV snapped P1–P4 to workpiece.");
+          setScanMessage("OBB region-growing CV snapped P1–P4 to workpiece.");
         } else if (!cameraActive && !uploadedImageUrl) {
           setScanMessage("No camera/photo yet — click SAMPLE or PHOTO below.");
         } else {

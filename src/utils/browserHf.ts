@@ -6,19 +6,83 @@
  * Zero API keys required, zero cost, with fast timeouts so the UI never hangs on slow networks.
  */
 
-const CANDIDATE_LABELS = [
-  "a green printed circuit board",
-  "an aluminium metal plate",
-  "a dark steel metal plate",
-  "a clear acrylic plastic sheet",
+const VISION_CLASSES: {
+  prompt: string;
+  display: string;
+  materialId: "fr4" | "al6061" | "steel" | "acrylic";
+}[] = [
+  {
+    prompt: "a smartphone or mobile phone back cover in a case",
+    display: "Smartphone / Polymer-Alloy Chassis",
+    materialId: "acrylic",
+  },
+  {
+    prompt: "a green printed circuit board PCB with electronic chips",
+    display: "FR-4 Printed Circuit Board (PCB)",
+    materialId: "fr4",
+  },
+  {
+    prompt: "a shiny brushed silver aluminium metal plate",
+    display: "6061-T6 Aluminium Plate",
+    materialId: "al6061",
+  },
+  {
+    prompt: "a heavy dark steel or iron metal plate",
+    display: "A36 Structural Steel Plate",
+    materialId: "steel",
+  },
+  {
+    prompt: "a clear or colored plastic acrylic polymer sheet",
+    display: "Cast Acrylic / Polymer Sheet",
+    materialId: "acrylic",
+  },
+  {
+    prompt: "a wooden board or hardcover book",
+    display: "Wood / Composite Board",
+    materialId: "fr4",
+  },
 ];
+
+const CANDIDATE_LABELS = VISION_CLASSES.map((c) => c.prompt);
+
+const EXCLUDED_ROOM_CLASSES = new Set([
+  "person",
+  "chair",
+  "couch",
+  "bed",
+  "dining table",
+  "tv",
+  "potted plant",
+]);
+
+function formatDetectedLabel(label: string): string {
+  const l = label.toLowerCase();
+  if (l === "cell phone") return "Smartphone / Polymer-Alloy Chassis";
+  if (l === "book") return "Wood / Composite Board";
+  if (l === "laptop") return "Laptop PCB / Alloy Chassis";
+  if (l === "remote") return "Handheld FR-4 Enclosure";
+  if (l === "keyboard") return "Mechanical PCB Assembly";
+  return label;
+}
+
+function classifyVisionEntry(promptLabel: string): {
+  display: string;
+  materialId: "fr4" | "al6061" | "steel" | "acrylic" | null;
+} {
+  const matched = VISION_CLASSES.find((c) => c.prompt === promptLabel);
+  if (matched) return { display: matched.display, materialId: matched.materialId };
+  return { display: promptLabel, materialId: labelToMaterialId(promptLabel) };
+}
 
 function labelToMaterialId(label: string): "fr4" | "al6061" | "steel" | "acrylic" | null {
   const l = label.toLowerCase();
-  if (l.includes("circuit")) return "fr4";
+  if (l.includes("smartphone") || l.includes("cell phone") || l.includes("polymer")) return "acrylic";
+  if (l.includes("circuit") || l.includes("pcb") || l.includes("fr-4") || l.includes("wood") || l.includes("composite")) {
+    return "fr4";
+  }
   if (l.includes("aluminium") || l.includes("aluminum")) return "al6061";
-  if (l.includes("steel")) return "steel";
-  if (l.includes("acrylic")) return "acrylic";
+  if (l.includes("steel") || l.includes("iron")) return "steel";
+  if (l.includes("acrylic") || l.includes("plastic")) return "acrylic";
   return null;
 }
 
@@ -141,6 +205,12 @@ async function getAudioPipeline() {
   return audioPipePromise;
 }
 
+export function preloadVisionModels(): void {
+  if (typeof window === "undefined") return;
+  void getObjectDetectionPipeline().catch(() => {});
+  void getVisionPipeline().catch(() => {});
+}
+
 export interface BrowserObjectDetection {
   model: string;
   label: string;
@@ -168,15 +238,15 @@ export async function detectObjectInBrowser(
           box: { xmin: number; ymin: number; xmax: number; ymax: number };
         }[];
         if (!Array.isArray(results) || results.length === 0) return null;
-        // Prefer non-person objects if multiple detections exist
-        const nonPerson = results.filter((r) => r.label.toLowerCase() !== "person");
-        const best = (nonPerson.length > 0 ? nonPerson : results).sort(
-          (a, b) => b.score - a.score
-        )[0];
+        const candidates = results.filter(
+          (r) => !EXCLUDED_ROOM_CLASSES.has(r.label.toLowerCase())
+        );
+        if (candidates.length === 0) return null;
+        const best = candidates.sort((a, b) => b.score - a.score)[0];
         if (!best || !best.box) return null;
         return {
           model: "Xenova/yolos-tiny (ONNX)",
-          label: best.label,
+          label: formatDetectedLabel(best.label),
           score: best.score,
           box: best.box,
         };
@@ -215,11 +285,12 @@ export async function classifyBoardInBrowser(
         }[];
         if (!Array.isArray(results) || results.length === 0) return null;
         const best = results[0];
+        const info = classifyVisionEntry(best.label);
         return {
           model: "Xenova/clip-vit-base-patch32 (ONNX)",
-          label: best.label,
+          label: info.display,
           score: best.score,
-          materialId: labelToMaterialId(best.label),
+          materialId: info.materialId,
         };
       })(),
       timeoutMs

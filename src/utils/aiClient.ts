@@ -49,19 +49,34 @@ export interface BoardDetection {
 
 function materialFromLabel(label: string): BoardDetection["materialId"] {
   const l = label.toLowerCase();
-  if (l.includes("circuit")) return "fr4";
+  if (l.includes("smartphone") || l.includes("cell phone") || l.includes("polymer")) return "acrylic";
+  if (
+    l.includes("circuit") ||
+    l.includes("pcb") ||
+    l.includes("fr-4") ||
+    l.includes("wood") ||
+    l.includes("composite") ||
+    l.includes("remote") ||
+    l.includes("laptop") ||
+    l.includes("keyboard") ||
+    l.includes("book")
+  ) {
+    return "fr4";
+  }
   if (l.includes("aluminium") || l.includes("aluminum")) return "al6061";
-  if (l.includes("steel")) return "steel";
-  if (l.includes("acrylic")) return "acrylic";
-  if (l.includes("cell phone") || l.includes("remote") || l.includes("laptop")) return "fr4";
+  if (l.includes("steel") || l.includes("iron")) return "steel";
+  if (l.includes("acrylic") || l.includes("plastic")) return "acrylic";
   return null;
 }
 
-/** Fast object + material detection (Cloud OWL-ViT if HF_TOKEN set, else in-browser YOLOS-Tiny ONNX). */
-export async function detectBoardHF(image: Blob): Promise<BoardDetection | null> {
+/** Fast object + material detection (Cloud OWL-ViT if HF_TOKEN set, else in-browser YOLOS-Tiny ONNX + cropped CLIP ROI). */
+export async function detectBoardHF(
+  fullImage: Blob,
+  croppedImage?: Blob
+): Promise<BoardDetection | null> {
   try {
     const form = new FormData();
-    form.append("file", image, "frame.jpg");
+    form.append("file", fullImage, "frame.jpg");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3500);
     const res = await fetch("/api/ai/detect", { method: "POST", body: form, signal: controller.signal });
@@ -88,7 +103,7 @@ export async function detectBoardHF(image: Blob): Promise<BoardDetection | null>
     // fallback to fast in-browser YOLOS-Tiny ONNX
   }
 
-  const obj = await detectObjectInBrowser(image, 3500);
+  const obj = await detectObjectInBrowser(fullImage, 3500);
   if (obj) {
     return {
       model: obj.model,
@@ -99,7 +114,7 @@ export async function detectBoardHF(image: Blob): Promise<BoardDetection | null>
     };
   }
 
-  const cls = await classifyBoardInBrowser(image, 2500);
+  const cls = await classifyBoardInBrowser(croppedImage ?? fullImage, 3500);
   if (cls) {
     return {
       model: cls.model,

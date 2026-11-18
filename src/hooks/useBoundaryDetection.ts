@@ -27,6 +27,8 @@ export interface BoundaryDetectionState {
   stopVideoTracking: () => void;
   setAutoTracking: (enabled: boolean) => void;
   detectOnce: () => boolean;
+  setCornersFromAi: (corners: Point2D[]) => void;
+  getLatestCorners: () => Point2D[];
   processImageFile: (file: File) => void;
   clearUploadedImage: () => void;
   lockBoundary: () => void;
@@ -133,11 +135,12 @@ export function detectQuadFromSource(
     bgB /= bgCount;
   }
 
-  // 2. 5x5 Box-Blurred RGB Map + 3x3 Grayscale Blur
+  // 2. 5x5 Box-Blurred RGB Map + 3x3 Grayscale Blur + Combined RGB/YCbCr Skin Mask with 1px Dilation
   const blurR = new Float32Array(total);
   const blurG = new Float32Array(total);
   const blurB = new Float32Array(total);
   const blurred = new Float32Array(total);
+  const rawSkinMask = new Uint8Array(total);
   const skinMask = new Uint8Array(total);
 
   for (let y = 0; y < procH; y++) {
@@ -147,16 +150,20 @@ export function detectQuadFromSource(
       const r = data[dIdx];
       const g = data[dIdx + 1];
       const b = data[dIdx + 2];
-      if (
+      const rgbSkin =
         r > 95 &&
         g > 40 &&
         b > 20 &&
         r > g &&
         r - g > 15 &&
         r - b > 15 &&
-        Math.abs(r - g) < 110
-      ) {
-        skinMask[i] = 1;
+        Math.abs(r - g) < 110;
+      const yLum = gray[i];
+      const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+      const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+      const ycbcrSkin = yLum > 35 && cb >= 77 && cb <= 128 && cr >= 133 && cr <= 175 && r > g;
+      if (rgbSkin || ycbcrSkin) {
+        rawSkinMask[i] = 1;
       }
 
       const x0 = Math.max(0, x - 2);
@@ -179,6 +186,23 @@ export function detectQuadFromSource(
       blurG[i] = sg / cnt;
       blurB[i] = sb / cnt;
       blurred[i] = sgray / cnt;
+    }
+  }
+
+  for (let y = 0; y < procH; y++) {
+    for (let x = 0; x < procW; x++) {
+      const i = y * procW + x;
+      if (!rawSkinMask[i]) continue;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= procH) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          if (nx >= 0 && nx < procW) {
+            skinMask[ny * procW + nx] = 1;
+          }
+        }
+      }
     }
   }
 
@@ -206,10 +230,10 @@ export function detectQuadFromSource(
   const meanMag = sumMag / total;
   const edgeBarrier = Math.max(95, meanMag * 3.1);
 
-  // 4. Multi-Seed Region Growing across 15 interior seed points
+  // 4. Multi-Seed Region Growing across 42 interior seed points
   const seedCoords: [number, number][] = [];
-  for (const u of [0.25, 0.38, 0.5, 0.62, 0.75]) {
-    for (const v of [0.28, 0.5, 0.72]) {
+  for (const u of [0.18, 0.3, 0.42, 0.5, 0.58, 0.7, 0.82]) {
+    for (const v of [0.2, 0.32, 0.44, 0.56, 0.68, 0.8]) {
       seedCoords.push([Math.round(u * procW), Math.round(v * procH)]);
     }
   }
@@ -222,6 +246,7 @@ export function detectQuadFromSource(
 
   let bestScore = -1;
   let bestCorners: Point2D[] | null = null;
+  let bestProcCorners: { x: number; y: number }[] | null = null;
   let bestRegionPixels: number[] = [];
   let bestFillRatio = 0;
 
@@ -244,9 +269,6 @@ export function detectQuadFromSource(
     const regionPixels: number[] = [];
     let minX = procW, maxX = 0, minY = procH, maxY = 0;
     let sumX = 0, sumY = 0;
-    let minSum = Infinity, maxSum = -Infinity;
-    let minDiff = Infinity, maxDiff = -Infinity;
-    let p1x = 0, p1y = 0, p2x = 0, p2y = 0, p3x = 0, p3y = 0, p4x = 0, p4y = 0;
 
     while (head < tail) {
       const idx = queue[head++];
@@ -260,13 +282,6 @@ export function detectQuadFromSource(
       if (px > maxX) maxX = px;
       if (py < minY) minY = py;
       if (py > maxY) maxY = py;
-
-      const s = px + py;
-      const d = px - py;
-      if (s < minSum) { minSum = s; p1x = px; p1y = py; }
-      if (d > maxDiff) { maxDiff = d; p2x = px; p2y = py; }
-      if (s > maxSum) { maxSum = s; p3x = px; p3y = py; }
-      if (d < minDiff) { minDiff = d; p4x = px; p4y = py; }
 
       // 4-connected growth bounded by seed similarity and step-edge barriers
       const neighbors = [
@@ -298,84 +313,161 @@ export function detectQuadFromSource(
     const areaCount = regionPixels.length;
     if (areaCount < total * 0.035) continue;
 
-    const bw = maxX - minX + 1;
-    const bh = maxY - minY + 1;
-    const boxArea = bw * bh;
-    if (boxArea > total * 0.72) continue;
-
-    // Reject regions touching 3 or more outer borders of the frame
+    // Reject regions touching 2 or more outer borders of the frame (walls, shirts, tables)
     let bordersTouched = 0;
     if (minX <= 5) bordersTouched++;
     if (maxX >= procW - 6) bordersTouched++;
     if (minY <= 5) bordersTouched++;
     if (maxY >= procH - 6) bordersTouched++;
-    if (bordersTouched >= 3) continue;
+    if (bordersTouched >= 2) continue;
 
-    const fillRatio = areaCount / Math.max(1, boxArea);
-    if (fillRatio < 0.48) continue;
-
-    const bgDiff = Math.abs(sr - bgR) + Math.abs(sg - bgG) + Math.abs(sb - bgB);
+    // 5. Minimum-Area Oriented Bounding Box (OBB) Corner Reconstruction (occlusion-immune)
     const centroidX = sumX / areaCount;
     const centroidY = sumY / areaCount;
+
+    const boundaryX: number[] = [];
+    const boundaryY: number[] = [];
+    for (let k = 0; k < areaCount; k++) {
+      const idx = regionPixels[k];
+      const px = idx % procW;
+      const py = (idx - px) / procW;
+      const isBnd =
+        px <= 2 ||
+        px >= procW - 3 ||
+        py <= 2 ||
+        py >= procH - 3 ||
+        !visitedLocal[idx - 1] ||
+        !visitedLocal[idx + 1] ||
+        !visitedLocal[idx - procW] ||
+        !visitedLocal[idx + procW];
+      if (isBnd) {
+        boundaryX.push(px);
+        boundaryY.push(py);
+      }
+    }
+    if (boundaryX.length < 12) continue;
+
+    let bestRad = 0;
+    let minObbArea = Infinity;
+    for (let deg = -45; deg <= 45; deg += 1.5) {
+      const rad = (deg * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+      for (let b = 0; b < boundaryX.length; b++) {
+        const dx = boundaryX[b] - centroidX;
+        const dy = boundaryY[b] - centroidY;
+        const u = dx * cos + dy * sin;
+        const v = -dx * sin + dy * cos;
+        if (u < uMin) uMin = u;
+        if (u > uMax) uMax = u;
+        if (v < vMin) vMin = v;
+        if (v > vMax) vMax = v;
+      }
+      const obbArea = (uMax - uMin) * (vMax - vMin);
+      if (obbArea < minObbArea) {
+        minObbArea = obbArea;
+        bestRad = rad;
+      }
+    }
+
+    const optCos = Math.cos(bestRad);
+    const optSin = Math.sin(bestRad);
+    const sampleStep = Math.max(1, Math.floor(areaCount / 1600));
+    const uVals: number[] = [];
+    const vVals: number[] = [];
+    for (let k = 0; k < areaCount; k += sampleStep) {
+      const idx = regionPixels[k];
+      const px = idx % procW;
+      const py = (idx - px) / procW;
+      const dx = px - centroidX;
+      const dy = py - centroidY;
+      uVals.push(dx * optCos + dy * optSin);
+      vVals.push(-dx * optSin + dy * optCos);
+    }
+    uVals.sort((a, b) => a - b);
+    vVals.sort((a, b) => a - b);
+
+    const pLow = Math.floor(0.01 * (uVals.length - 1));
+    const pHigh = Math.ceil(0.99 * (uVals.length - 1));
+    const u0 = uVals[pLow];
+    const u1 = uVals[pHigh];
+    const v0 = vVals[pLow];
+    const v1 = vVals[pHigh];
+
+    const obbBoxArea = Math.max(1, (u1 - u0) * (v1 - v0));
+    if (obbBoxArea > total * 0.72) continue;
+
+    const obbFillRatio = areaCount / obbBoxArea;
+    if (obbFillRatio < 0.48) continue;
+
+    const backProject = (u: number, v: number) => ({
+      x: Math.max(3, Math.min(procW - 4, centroidX + u * optCos - v * optSin)),
+      y: Math.max(3, Math.min(procH - 4, centroidY + u * optSin + v * optCos)),
+    });
+
+    const rawQuad = [
+      backProject(u0, v0),
+      backProject(u1, v0),
+      backProject(u1, v1),
+      backProject(u0, v1),
+    ];
+
+    const bgDiff = Math.abs(sr - bgR) + Math.abs(sg - bgG) + Math.abs(sb - bgB);
     const distToCenter = Math.hypot(centroidX - cxFrame, centroidY - cyFrame);
     const centrality = Math.max(0.15, 1.0 - 0.85 * (distToCenter / Math.max(1, maxDist)));
-    const score =
+    let score =
       areaCount *
-      Math.pow(fillRatio, 1.5) *
+      Math.pow(Math.min(1, obbFillRatio), 1.5) *
       centrality *
       (1 + Math.min(1.5, bgDiff / 80));
+    if (bordersTouched === 1) score *= 0.2;
 
     if (score > bestScore) {
       bestScore = score;
       bestRegionPixels = regionPixels;
-      bestFillRatio = fillRatio;
+      bestFillRatio = Math.min(1, obbFillRatio);
+      bestProcCorners = rawQuad;
       const scaleX = targetWidth / procW;
       const scaleY = targetHeight / procH;
-      bestCorners = [
-        { x: Math.round(p1x * scaleX), y: Math.round(p1y * scaleY), label: "P1" },
-        { x: Math.round(p2x * scaleX), y: Math.round(p2y * scaleY), label: "P2" },
-        { x: Math.round(p3x * scaleX), y: Math.round(p3y * scaleY), label: "P3" },
-        { x: Math.round(p4x * scaleX), y: Math.round(p4y * scaleY), label: "P4" },
-      ];
+      bestCorners = rawQuad.map((pt, idx) => ({
+        x: Math.round(Math.max(8, Math.min(targetWidth - 8, pt.x * scaleX))),
+        y: Math.round(Math.max(8, Math.min(targetHeight - 8, pt.y * scaleY))),
+        label: `P${idx + 1}`,
+      }));
     }
   }
 
-  // Render overlay highlighting detected object contour + subtle interior mask
+  // 6. Render overlay highlighting segmented interior + crisp reconstructed OBB quad perimeter
   if (overlayCanvas) {
     overlayCanvas.width = procW;
     overlayCanvas.height = procH;
     const overlayCtx = overlayCanvas.getContext("2d");
     if (overlayCtx) {
       const overlayData = overlayCtx.createImageData(procW, procH);
-      const regionMask = new Uint8Array(total);
-      for (const idx of bestRegionPixels) regionMask[idx] = 1;
-
       for (const idx of bestRegionPixels) {
-        const px = idx % procW;
-        const py = (idx - px) / procW;
-        const isEdge =
-          px <= 1 ||
-          px >= procW - 2 ||
-          py <= 1 ||
-          py >= procH - 2 ||
-          !regionMask[idx - 1] ||
-          !regionMask[idx + 1] ||
-          !regionMask[idx - procW] ||
-          !regionMask[idx + procW];
         const oIdx = idx * 4;
-        if (isEdge) {
-          overlayData.data[oIdx] = 52;
-          overlayData.data[oIdx + 1] = 211;
-          overlayData.data[oIdx + 2] = 153;
-          overlayData.data[oIdx + 3] = 245;
-        } else {
-          overlayData.data[oIdx] = 14;
-          overlayData.data[oIdx + 1] = 178;
-          overlayData.data[oIdx + 2] = 154;
-          overlayData.data[oIdx + 3] = 55;
-        }
+        overlayData.data[oIdx] = 14;
+        overlayData.data[oIdx + 1] = 178;
+        overlayData.data[oIdx + 2] = 154;
+        overlayData.data[oIdx + 3] = 55;
       }
       overlayCtx.putImageData(overlayData, 0, 0);
+
+      if (bestProcCorners && bestProcCorners.length === 4) {
+        overlayCtx.save();
+        overlayCtx.strokeStyle = "rgba(52, 211, 153, 0.96)";
+        overlayCtx.lineWidth = 2;
+        overlayCtx.lineJoin = "round";
+        overlayCtx.beginPath();
+        overlayCtx.moveTo(bestProcCorners[0].x, bestProcCorners[0].y);
+        for (let c = 1; c < 4; c++) {
+          overlayCtx.lineTo(bestProcCorners[c].x, bestProcCorners[c].y);
+        }
+        overlayCtx.closePath();
+        overlayCtx.stroke();
+        overlayCtx.restore();
+      }
     }
   }
 
@@ -388,20 +480,7 @@ export function detectQuadFromSource(
 }
 
 export function useBoundaryDetection(): BoundaryDetectionState {
-  const [polygonCoords, setPolygonCoords] = useState<Point2D[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("harmonix_boundary");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length === 4) return parsed;
-        }
-      } catch {
-        // ignore
-      }
-    }
-    return DEFAULT_CORNERS;
-  });
+  const [polygonCoords, setPolygonCoords] = useState<Point2D[]>(DEFAULT_CORNERS);
 
   const [isLocked, setIsLocked] = useState<boolean>(false);
   const [isCalibrating, setIsCalibrating] = useState<boolean>(false);
@@ -420,6 +499,7 @@ export function useBoundaryDetection(): BoundaryDetectionState {
   const uploadedImgRef = useRef<HTMLImageElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  const latestCornersRef = useRef<Point2D[]>(DEFAULT_CORNERS);
 
   const isLockedRef = useRef(isLocked);
   const isAutoTrackingRef = useRef(isAutoTracking);
@@ -429,6 +509,9 @@ export function useBoundaryDetection(): BoundaryDetectionState {
   useEffect(() => {
     isAutoTrackingRef.current = isAutoTracking;
   }, [isAutoTracking]);
+  useEffect(() => {
+    latestCornersRef.current = polygonCoords;
+  }, [polygonCoords]);
 
   const getWorkCanvas = useCallback(() => {
     if (!workCanvasRef.current && typeof document !== "undefined") {
@@ -446,13 +529,34 @@ export function useBoundaryDetection(): BoundaryDetectionState {
       if (next[index]) {
         next[index] = { ...next[index], x, y };
       }
+      latestCornersRef.current = next;
       return next;
     });
   }, []);
 
+  const setCornersFromAi = useCallback((corners: Point2D[]) => {
+    if (isLockedRef.current || corners.length !== 4) return;
+    const labeled = corners.map((c, idx) => ({
+      x: Math.round(c.x),
+      y: Math.round(c.y),
+      label: c.label ?? `P${idx + 1}`,
+    }));
+    latestCornersRef.current = labeled;
+    setPolygonCoords(labeled);
+  }, []);
+
+  const getLatestCorners = useCallback(() => latestCornersRef.current, []);
+
   const lockBoundary = useCallback(() => {
     setIsLocked(true);
     setIsAutoTracking(false);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("harmonix_boundary", JSON.stringify(latestCornersRef.current));
+      } catch {
+        // ignore storage quota errors
+      }
+    }
   }, []);
 
   const unlockBoundary = useCallback(() => {
@@ -460,6 +564,7 @@ export function useBoundaryDetection(): BoundaryDetectionState {
   }, []);
 
   const resetDefaultBoundary = useCallback(() => {
+    latestCornersRef.current = DEFAULT_CORNERS;
     setPolygonCoords(DEFAULT_CORNERS);
     setIsLocked(false);
   }, []);
@@ -498,6 +603,7 @@ export function useBoundaryDetection(): BoundaryDetectionState {
 
     setEdgeConfidence(result.confidence);
     if (result.corners) {
+      latestCornersRef.current = result.corners;
       setPolygonCoords(result.corners);
       return true;
     }
@@ -650,6 +756,8 @@ export function useBoundaryDetection(): BoundaryDetectionState {
     stopVideoTracking,
     setAutoTracking: setIsAutoTracking,
     detectOnce,
+    setCornersFromAi,
+    getLatestCorners,
     processImageFile,
     clearUploadedImage,
     lockBoundary,
