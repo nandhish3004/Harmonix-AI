@@ -12,6 +12,10 @@ import {
   Layers,
   Sparkles,
   SlidersHorizontal,
+  Mic,
+  RefreshCw,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
@@ -38,18 +42,24 @@ import {
 } from "@/utils/physics";
 
 type ViewMode = "ar" | "3d" | "2d";
+type ArVisualStyle = "sand" | "mesh";
 
 const DEFAULT_QUAD: Point2D[] = [
-  { x: 55, y: 75 },
-  { x: 305, y: 65 },
-  { x: 325, y: 295 },
-  { x: 35, y: 285 },
+  { x: 52, y: 68 },
+  { x: 308, y: 68 },
+  { x: 322, y: 296 },
+  { x: 38, y: 296 },
 ];
 
-/** Heat colormap: calm (cyan/green) → shaky (yellow/orange/red). amp is |displacement| in [0, ~2]. */
+/** Heat colormap: nodal calm (cyan/emerald) -> high displacement antinode (amber/red). */
 function heatHue(amp: number): number {
   const t = Math.max(0, Math.min(1, amp / 1.25));
-  return 185 - t * 185; // 185 (cyan) → 0 (red)
+  return 185 - t * 185;
+}
+
+interface SandGrain {
+  u: number;
+  v: number;
 }
 
 export default function ChladniViewportPage() {
@@ -60,17 +70,30 @@ export default function ChladniViewportPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscRef = useRef<OscillatorNode | null>(null);
+
+  // Live microphone drive refs
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micCtxRef = useRef<AudioContext | null>(null);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const micGainRef = useRef<number>(1.0);
+
+  // 3D Orbit & Chladni sand particle physics refs
   const orbitYawRef = useRef<number>(0.45);
   const orbitPitchRef = useRef<number>(0.62);
   const userOrbitedRef = useRef<boolean>(false);
   const dragStartRef = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
+  const sandGrainsRef = useRef<SandGrain[]>([]);
 
   const [frequency, setFrequency] = useState<number>(740);
   const [viewMode, setViewMode] = useState<ViewMode>("ar");
+  const [arStyle, setArStyle] = useState<ArVisualStyle>("sand");
+  const [arAnchorLocked, setArAnchorLocked] = useState<boolean>(false);
   const [cameraActive, setCameraActive] = useState<boolean>(false);
-  const [arTargetVisible, setArTargetVisible] = useState<boolean>(false);
+  const [arTargetVisible, setArTargetVisible] = useState<boolean>(true);
+  const [scanThumbUrl, setScanThumbUrl] = useState<string | null>(null);
   const [freqSource, setFreqSource] = useState<"theoretical" | "measured">("theoretical");
   const [isAudioOn, setIsAudioOn] = useState<boolean>(false);
+  const [isMicDriveOn, setIsMicDriveOn] = useState<boolean>(false);
   const [isSolving, setIsSolving] = useState<boolean>(false);
   const [guideOpen, setGuideOpen] = useState<boolean>(true);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
@@ -99,6 +122,23 @@ export default function ChladniViewportPage() {
     activeMode.n
   );
 
+  /** Initialize or scatter 1,800 physical Chladni sand grains uniformly across the board [0..1]^2. */
+  const scatterSandGrains = useCallback(() => {
+    const count = 1800;
+    const grains: SandGrain[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+      grains[i] = {
+        u: 0.02 + Math.random() * 0.96,
+        v: 0.02 + Math.random() * 0.96,
+      };
+    }
+    sandGrainsRef.current = grains;
+  }, []);
+
+  useEffect(() => {
+    scatterSandGrains();
+  }, [scatterSandGrains, activeMode.m, activeMode.n]);
+
   // Load stored scan / material / theoretical vs measured frequency source
   useEffect(() => {
     const mat = getStoredMaterial();
@@ -112,6 +152,9 @@ export default function ChladniViewportPage() {
     const defaultMode = computed.find((m) => m.id === "mode-2-2") ?? computed[2] ?? computed[0];
 
     if (typeof window !== "undefined") {
+      const thumb = localStorage.getItem("harmonix_scan_thumb");
+      if (thumb) setScanThumbUrl(thumb);
+
       const srcType = localStorage.getItem("harmonix_freq_source");
       const measFreq = Number(localStorage.getItem("harmonix_measured_freq"));
       const savedPeak = Number(localStorage.getItem("harmonix_peak_freq"));
@@ -132,8 +175,8 @@ export default function ChladniViewportPage() {
           if (Array.isArray(parsedNorm) && parsedNorm.length === 4) {
             setQuad(
               parsedNorm.map((p: Point2D) => ({
-                x: Math.max(15, Math.min(345, p.x * 360)),
-                y: Math.max(15, Math.min(345, p.y * 360)),
+                x: Math.max(18, Math.min(342, p.x * 360)),
+                y: Math.max(18, Math.min(342, p.y * 360)),
               }))
             );
           }
@@ -158,10 +201,12 @@ export default function ChladniViewportPage() {
     setLoaded(true);
   }, []);
 
-  // Honest Theoretical Eigenfrequency Solver + Live Acoustic Excitation Sweep
+  // Honest Theoretical Eigenfrequency Solver + Live Acoustic Excitation Sweep + Sand Re-Forming
   const runEigenSolverAndSweep = useCallback(() => {
     if (isSolving || !loaded) return;
     setIsSolving(true);
+    scatterSandGrains();
+
     const modes = computeAllModes(
       material,
       thicknessMm,
@@ -170,7 +215,8 @@ export default function ChladniViewportPage() {
       0
     );
     setAllModes(modes);
-    const target = modes.find((m) => m.m === activeMode.m && m.n === activeMode.n) ?? modes[2] ?? modes[0];
+    const target =
+      modes.find((m) => m.m === activeMode.m && m.n === activeMode.n) ?? modes[2] ?? modes[0];
     const solvedHz = Math.max(100, Math.min(3500, target.freqHz));
     setFrequency(solvedHz);
     setFreqSource("theoretical");
@@ -178,7 +224,6 @@ export default function ChladniViewportPage() {
       localStorage.setItem("harmonix_peak_freq", String(solvedHz));
     }
 
-    // Play brief live excitation tone sweep into speaker if audio context allowed
     try {
       const AudioCtx =
         window.AudioContext ||
@@ -204,13 +249,51 @@ export default function ChladniViewportPage() {
     }
 
     setAiMessage(
-      `Kirchhoff-Love FEA Mode ${target.indices}: ${solvedHz} Hz (theoretical baseline). Next screen measures actual board pitch with your mic.`
+      `Kirchhoff-Love FEA Mode ${target.indices} excited at ${solvedHz} Hz — watch the Chladni sand particles migrate to the zero-displacement nodal lines.`
     );
-    void speak(`Calculated mode frequency ${solvedHz} hertz.`, { interrupt: false });
+    void speak(`Exciting mode ${target.indices} at ${solvedHz} hertz.`, { interrupt: false });
     setTimeout(() => setIsSolving(false), 750);
-  }, [isSolving, loaded, material, thicknessMm, plateGeo, activeMode.m, activeMode.n]);
+  }, [isSolving, loaded, material, thicknessMm, plateGeo, activeMode.m, activeMode.n, scatterSandGrains]);
 
   useAutoAdvance(false, 2800, () => router.push("/tuner"));
+
+  // Toggle Live Microphone-Coupled AR Vibration
+  const toggleMicDrive = async () => {
+    if (isMicDriveOn) {
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
+      micCtxRef.current?.close().catch(() => {});
+      micCtxRef.current = null;
+      micAnalyserRef.current = null;
+      micGainRef.current = 1.0;
+      setIsMicDriveOn(false);
+      return;
+    }
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        });
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        const ac = new AudioCtx();
+        if (ac.state === "suspended") await ac.resume();
+        const src = ac.createMediaStreamSource(stream);
+        const an = ac.createAnalyser();
+        an.fftSize = 1024;
+        src.connect(an);
+        micStreamRef.current = stream;
+        micCtxRef.current = ac;
+        micAnalyserRef.current = an;
+        setIsMicDriveOn(true);
+        scatterSandGrains();
+        setAiMessage("Live Mic Drive active — tap your board or speak to drive the Chladni sand & 3D mesh live!");
+      }
+    } catch {
+      setAiMessage("Microphone unavailable for live drive.");
+    }
+  };
 
   // Live camera pass-through for AR
   useEffect(() => {
@@ -281,10 +364,12 @@ export default function ChladniViewportPage() {
     return () => {
       oscRef.current?.stop();
       audioCtxRef.current?.close().catch(() => {});
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      micCtxRef.current?.close().catch(() => {});
     };
   }, []);
 
-  // Spatial AR hologram + shaded rotating 3D surface
+  // Spatial AR Laser Vibrometer + 1,800-Particle Chladni Sand Physics + 3D Surface
   useEffect(() => {
     if (viewMode === "2d" || !spatialCanvasRef.current) return;
     const canvas = spatialCanvasRef.current;
@@ -293,38 +378,48 @@ export default function ChladniViewportPage() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    if (viewMode === "ar") setArTargetVisible(false);
-
     let raf = 0;
     let phase = 0;
     let frameTick = 0;
-    let targetVisible = false;
-    let missStreak = 0;
     let prevTrackState = null as ReturnType<typeof detectQuadFromSource>["track"];
-    const cols = viewMode === "ar" ? 20 : 26;
+    const cols = viewMode === "ar" ? 22 : 26;
     const rows = cols;
     const evalAmp = (nx: number, ny: number) =>
       chladniAmplitude(nx, ny, activeMode.m, activeMode.n);
+
+    // Anchor immediately to the user's scanned board polygon from Screen 2
     let trackedQuad: Point2D[] = quad.map((p) => ({ ...p }));
     const workCanvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
+    const micBuf = new Float32Array(256);
     const normW = plateGeo.aspectRatio >= 1 ? 1.0 : Math.max(0.45, plateGeo.aspectRatio);
     const normH = plateGeo.aspectRatio >= 1 ? Math.max(0.45, 1.0 / plateGeo.aspectRatio) : 1.0;
-    const gainScale = Math.min(2.2, 0.55 + activeMode.resonanceGain * 0.14);
-    const sparkles = Array.from({ length: 26 }, () => ({
-      u: Math.random(),
-      v: Math.random(),
-      s: 0.4 + Math.random() * 1.2,
-      o: Math.random() * 6.28,
-    }));
+    const baseGain = Math.min(2.2, 0.55 + activeMode.resonanceGain * 0.14);
+
+    // Physical peak deflection in micrometers (µm) for HUD telemetry
+    const omega = 2 * Math.PI * Math.max(100, frequency);
+    const maxDeflectionUm = Math.round(((activeMode.resonanceGain * 3.5 * 9.81) / (omega * omega)) * 1e6 * 10) / 10;
 
     type P = { sx: number; sy: number; amp: number; w: number; depth: number };
 
     const draw = () => {
-      phase += 0.12;
+      // Sample live microphone energy if Mic Drive is active
+      if (micAnalyserRef.current) {
+        micAnalyserRef.current.getFloatTimeDomainData(micBuf);
+        let sum = 0;
+        for (let i = 0; i < micBuf.length; i++) sum += micBuf[i] * micBuf[i];
+        const rms = Math.sqrt(sum / micBuf.length);
+        micGainRef.current = 0.55 + Math.min(2.4, rms * 18);
+      } else {
+        micGainRef.current = 1.0;
+      }
+
+      const gainScale = baseGain * micGainRef.current;
+      phase += 0.14 * Math.min(1.6, micGainRef.current);
       frameTick++;
 
-      // Live camera CV quad verification on AR frames (never hallucinate without camera lock)
+      // Smoothly refine AR quad when camera detects strong board edges (unless user locked the anchor)
       if (
+        !arAnchorLocked &&
         (frameTick === 1 || frameTick % 4 === 0) &&
         viewMode === "ar" &&
         cameraActive &&
@@ -343,91 +438,21 @@ export default function ChladniViewportPage() {
           prevTrackState
         );
         prevTrackState = res.track;
-        if (res.corners && res.corners.length === 4 && res.confidence >= 65) {
-          missStreak = 0;
-          if (!targetVisible) {
-            targetVisible = true;
-            setArTargetVisible(true);
-            trackedQuad = res.corners.map((p) => ({ x: p.x, y: p.y }));
-          } else {
-            trackedQuad = trackedQuad.map((p, idx) => {
-              const delta = Math.hypot(res.corners![idx].x - p.x, res.corners![idx].y - p.y);
-              const alpha = delta < 1.5 ? 0 : delta < 6 ? 0.18 : 0.32;
-              return {
-                x: p.x * (1 - alpha) + res.corners![idx].x * alpha,
-                y: p.y * (1 - alpha) + res.corners![idx].y * alpha,
-              };
-            });
-          }
-        } else {
-          missStreak++;
-          if (missStreak >= 3 && targetVisible) {
-            targetVisible = false;
-            setArTargetVisible(false);
-          }
+        if (res.corners && res.corners.length === 4 && res.confidence >= 55) {
+          setArTargetVisible(true);
+          trackedQuad = trackedQuad.map((p, idx) => {
+            const delta = Math.hypot(res.corners![idx].x - p.x, res.corners![idx].y - p.y);
+            const alpha = delta < 2 ? 0 : delta < 8 ? 0.15 : 0.28;
+            return {
+              x: p.x * (1 - alpha) + res.corners![idx].x * alpha,
+              y: p.y * (1 - alpha) + res.corners![idx].y * alpha,
+            };
+          });
         }
       }
 
       ctx.globalCompositeOperation = "source-over";
       ctx.clearRect(0, 0, 360, 360);
-
-      // In AR mode without a confirmed workpiece in camera view, draw clean engineering target reticle only
-      if (viewMode === "ar" && !targetVisible) {
-        ctx.save();
-        ctx.strokeStyle = "rgba(34, 211, 238, 0.72)";
-        ctx.lineWidth = 2;
-        const bx0 = 64, by0 = 72, bx1 = 296, by1 = 288, br = 22;
-        const corners = [
-          [bx0, by0, 1, 1],
-          [bx1, by0, -1, 1],
-          [bx1, by1, -1, -1],
-          [bx0, by1, 1, -1],
-        ];
-        corners.forEach(([cx, cy, dx, dy]) => {
-          ctx.beginPath();
-          ctx.moveTo(cx, cy + dy * br);
-          ctx.lineTo(cx, cy);
-          ctx.lineTo(cx + dx * br, cy);
-          ctx.stroke();
-        });
-        ctx.setLineDash([5, 5]);
-        ctx.strokeStyle = "rgba(148, 163, 184, 0.45)";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(bx0, by0, bx1 - bx0, by1 - by0);
-        ctx.setLineDash([]);
-
-        ctx.beginPath();
-        ctx.moveTo(170, 180);
-        ctx.lineTo(190, 180);
-        ctx.moveTo(180, 170);
-        ctx.lineTo(180, 190);
-        ctx.strokeStyle = "rgba(34, 211, 238, 0.85)";
-        ctx.stroke();
-
-        ctx.fillStyle = "rgba(13, 25, 28, 0.84)";
-        ctx.beginPath();
-        ctx.roundRect(38, 162, 284, 44, 10);
-        ctx.fill();
-        ctx.strokeStyle = "rgba(34, 211, 238, 0.5)";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        ctx.fillStyle = "#67E8F9";
-        ctx.font = "bold 10px JetBrains Mono, monospace";
-        ctx.textAlign = "center";
-        ctx.fillText(
-          cameraActive ? "NO WORKPIECE IN CAMERA VIEW" : "CAMERA OFF FOR LIVE AR",
-          180,
-          181
-        );
-        ctx.fillStyle = "#CBD5E1";
-        ctx.font = "9px Inter, sans-serif";
-        ctx.fillText("POINT CAMERA AT BOARD OR SWITCH TO 3D / 2D", 180, 197);
-        ctx.restore();
-
-        raf = requestAnimationFrame(draw);
-        return;
-      }
 
       const H = computeHomography(trackedQuad);
 
@@ -438,7 +463,6 @@ export default function ChladniViewportPage() {
         g.addColorStop(1, "#15282C");
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, 360, 360);
-        // Soft floor glow
         const rg = ctx.createRadialGradient(180, 255, 10, 180, 255, 190);
         rg.addColorStop(0, "rgba(14,178,154,0.24)");
         rg.addColorStop(1, "rgba(14,178,154,0)");
@@ -448,7 +472,7 @@ export default function ChladniViewportPage() {
 
       const osc = Math.sin(phase);
       if (viewMode === "3d" && !userOrbitedRef.current) {
-        orbitYawRef.current += 0.008;
+        orbitYawRef.current += 0.007;
       }
       const yaw = orbitYawRef.current;
       const pitch = orbitPitchRef.current;
@@ -464,7 +488,7 @@ export default function ChladniViewportPage() {
         for (let c = 0; c <= cols; c++) {
           const nx = c / cols;
           const w = evalAmp(nx, ny);
-          const z = w * osc * gainScale * (viewMode === "ar" ? 12 : 24);
+          const z = w * osc * gainScale * (viewMode === "ar" ? 10 : 24);
           if (viewMode === "ar") {
             const p = applyHomography(H, nx, ny);
             rowArr.push({ sx: p.x, sy: p.y - z, amp: Math.abs(w), w, depth: 0 });
@@ -485,7 +509,7 @@ export default function ChladniViewportPage() {
         pts.push(rowArr);
       }
 
-      // Collect quads (painter's algorithm for 3D)
+      // Collect quads
       const quads: { a: P; b: P; c: P; d: P; depth: number; amp: number }[] = [];
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
@@ -505,15 +529,21 @@ export default function ChladniViewportPage() {
       }
       if (viewMode === "3d") quads.sort((p, q) => p.depth - q.depth);
 
-      if (viewMode === "ar") ctx.globalCompositeOperation = "lighter";
-
+      // Draw Laser Vibrometer surface field + Nodal zero-crossing contour lines
       for (const q of quads) {
         const hue = heatHue(q.amp);
-        const light = viewMode === "3d" ? 42 + q.amp * 14 : 55;
+        const light = viewMode === "3d" ? 42 + q.amp * 14 : 52;
+        const fillAlpha =
+          viewMode === "ar"
+            ? arStyle === "sand"
+              ? 0.08 + Math.min(0.22, q.amp * 0.18)
+              : 0.18 + Math.min(0.36, q.amp * 0.3)
+            : 0.92;
+
         ctx.fillStyle =
           viewMode === "ar"
-            ? `hsla(${hue}, 100%, ${light}%, ${0.14 + Math.min(0.34, q.amp * 0.3)})`
-            : `hsl(${hue}, 90%, ${light}%)`;
+            ? `hsla(${hue}, 95%, ${light}%, ${fillAlpha})`
+            : `hsl(${hue}, 88%, ${light}%)`;
         ctx.beginPath();
         ctx.moveTo(q.a.sx, q.a.sy);
         ctx.lineTo(q.b.sx, q.b.sy);
@@ -521,128 +551,147 @@ export default function ChladniViewportPage() {
         ctx.lineTo(q.d.sx, q.d.sy);
         ctx.closePath();
         ctx.fill();
-        ctx.strokeStyle =
-          viewMode === "ar"
-            ? `hsla(${hue}, 100%, 70%, 0.85)`
-            : "rgba(255,255,255,0.22)";
-        ctx.lineWidth = viewMode === "ar" ? 0.9 : 0.6;
-        ctx.stroke();
 
-        // Nodal zero-crossing contour lines on 3D surface
-        if (viewMode === "3d") {
-          const edges: [P, P][] = [
-            [q.a, q.b],
-            [q.b, q.c],
-            [q.c, q.d],
-            [q.d, q.a],
-          ];
-          const hits: { x: number; y: number }[] = [];
-          for (const [p0, p1] of edges) {
-            if ((p0.w <= 0 && p1.w > 0) || (p0.w >= 0 && p1.w < 0)) {
-              const t = Math.abs(p0.w) / (Math.abs(p0.w) + Math.abs(p1.w) + 1e-6);
-              hits.push({
-                x: p0.sx + (p1.sx - p0.sx) * t,
-                y: p0.sy + (p1.sy - p0.sy) * t,
-              });
-            }
+        if (viewMode === "3d" || arStyle === "mesh") {
+          ctx.strokeStyle =
+            viewMode === "ar"
+              ? `hsla(${hue}, 100%, 70%, 0.65)`
+              : "rgba(255,255,255,0.22)";
+          ctx.lineWidth = viewMode === "ar" ? 0.8 : 0.6;
+          ctx.stroke();
+        }
+
+        // Draw crisp Kirchhoff-Love Nodal Zero-Crossing Contours (W(x,y) = 0) in BOTH AR and 3D
+        const edges: [P, P][] = [
+          [q.a, q.b],
+          [q.b, q.c],
+          [q.c, q.d],
+          [q.d, q.a],
+        ];
+        const hits: { x: number; y: number }[] = [];
+        for (const [p0, p1] of edges) {
+          if ((p0.w <= 0 && p1.w > 0) || (p0.w >= 0 && p1.w < 0)) {
+            const t = Math.abs(p0.w) / (Math.abs(p0.w) + Math.abs(p1.w) + 1e-6);
+            hits.push({
+              x: p0.sx + (p1.sx - p0.sx) * t,
+              y: p0.sy + (p1.sy - p0.sy) * t,
+            });
           }
-          if (hits.length >= 2) {
-            ctx.strokeStyle = "rgba(248, 250, 252, 0.85)";
-            ctx.lineWidth = 1.4;
-            ctx.beginPath();
-            ctx.moveTo(hits[0].x, hits[0].y);
-            ctx.lineTo(hits[1].x, hits[1].y);
-            ctx.stroke();
+        }
+        if (hits.length >= 2) {
+          ctx.strokeStyle =
+            viewMode === "ar" ? "rgba(103, 232, 249, 0.75)" : "rgba(248, 250, 252, 0.88)";
+          ctx.lineWidth = viewMode === "ar" ? 1.5 : 1.4;
+          ctx.beginPath();
+          ctx.moveTo(hits[0].x, hits[0].y);
+          ctx.lineTo(hits[1].x, hits[1].y);
+          ctx.stroke();
+        }
+      }
+
+      // Update & Render 1,800 Physical Chladni Sand Particles migrating to nodal lines (W(u,v) = 0)
+      if (arStyle === "sand") {
+        const grains = sandGrainsRef.current;
+        const eps = 0.008;
+        const driveStrength = Math.min(2.0, 0.65 + micGainRef.current * 0.55);
+
+        for (let i = 0; i < grains.length; i++) {
+          const g = grains[i];
+          const w0 = Math.abs(evalAmp(g.u, g.v));
+
+          if (w0 > 0.03) {
+            // Finite-difference gradient of |W(u,v)| -> particles drift downhill toward nodal lines
+            const wu = Math.abs(evalAmp(Math.min(0.99, g.u + eps), g.v)) - w0;
+            const wv = Math.abs(evalAmp(g.u, Math.min(0.99, g.v + eps))) - w0;
+            const step = 0.018 * driveStrength;
+            g.u -= (wu / eps) * step * w0 + (Math.random() - 0.5) * 0.022 * w0 * driveStrength;
+            g.v -= (wv / eps) * step * w0 + (Math.random() - 0.5) * 0.022 * w0 * driveStrength;
+            g.u = Math.max(0.015, Math.min(0.985, g.u));
+            g.v = Math.max(0.015, Math.min(0.985, g.v));
           }
+
+          let sx = 0;
+          let sy = 0;
+          const jitterZ = w0 > 0.08 ? Math.sin(phase * 1.8 + i) * w0 * 4.5 * driveStrength : 0;
+
+          if (viewMode === "ar") {
+            const p = applyHomography(H, g.u, g.v);
+            sx = p.x;
+            sy = p.y - jitterZ;
+          } else {
+            const wSigned = evalAmp(g.u, g.v);
+            const z = wSigned * osc * gainScale * 24;
+            const cx = (g.u - 0.5) * normW;
+            const cy = (g.v - 0.5) * normH;
+            const rx = cx * cosY - cy * sinY;
+            const ry = cx * sinY + cy * cosY;
+            sx = 180 + rx * 230;
+            sy = 196 + ry * cosP * 205 - (z + jitterZ) * sinP;
+          }
+
+          // Settled nodal sand grains glow crisp gold/cream; flying antinode grains are warm orange
+          ctx.fillStyle =
+            w0 < 0.09 ? "rgba(245, 240, 196, 0.94)" : "rgba(251, 191, 36, 0.62)";
+          ctx.fillRect(sx - 0.9, sy - 0.9, 1.9, 1.9);
         }
       }
 
       if (viewMode === "ar") {
         ctx.globalCompositeOperation = "source-over";
 
-        // Glowing AR quad lock with corner brackets
-        ctx.shadowColor = "#22D3EE";
-        ctx.shadowBlur = 14;
-        ctx.strokeStyle = "#67E8F9";
-        ctx.lineWidth = 2.5;
+        // Precision Laser Vibrometer Perimeter Lock & Corner Fiducials P1..P4
+        ctx.strokeStyle = "#22D3EE";
+        ctx.lineWidth = 2.2;
         ctx.beginPath();
         trackedQuad.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
         ctx.closePath();
         ctx.stroke();
 
-        ctx.fillStyle = "#DDF0C2";
-        trackedQuad.forEach((p) => {
+        trackedQuad.forEach((p, idx) => {
+          ctx.fillStyle = "#0D191C";
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
           ctx.fill();
+          ctx.strokeStyle = "#4ADE80";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.fillStyle = "#F8FAFC";
+          ctx.font = "bold 8px JetBrains Mono, monospace";
+          ctx.textAlign = "center";
+          ctx.fillText(`P${idx + 1}`, p.x, p.y + 3);
         });
 
-        // Holographic scanner sweep
-        const scanV = (Math.sin(phase * 0.5) + 1) * 0.5;
+        // Laser Doppler Scanner Line
+        const scanV = (Math.sin(phase * 0.42) + 1) * 0.5;
         const sL = applyHomography(H, 0, scanV);
         const sR = applyHomography(H, 1, scanV);
         const sg = ctx.createLinearGradient(sL.x, sL.y, sR.x, sR.y);
-        sg.addColorStop(0, "rgba(34,211,238,0)");
-        sg.addColorStop(0.5, "rgba(14,178,154,0.95)");
-        sg.addColorStop(1, "rgba(34,211,238,0)");
+        sg.addColorStop(0, "rgba(34,211,238,0.1)");
+        sg.addColorStop(0.5, "rgba(74,222,128,0.95)");
+        sg.addColorStop(1, "rgba(34,211,238,0.1)");
         ctx.strokeStyle = sg;
-        ctx.lineWidth = 3.5;
-        ctx.shadowColor = "#0EB29A";
-        ctx.shadowBlur = 16;
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
         ctx.moveTo(sL.x, sL.y);
         ctx.lineTo(sR.x, sR.y);
         ctx.stroke();
-        ctx.shadowBlur = 0;
 
-        // Floating sparkles anchored to the board plane
-        sparkles.forEach((sp) => {
-          const base = applyHomography(H, sp.u, sp.v);
-          const tw = (Math.sin(phase * 1.4 + sp.o) + 1) * 0.5;
-          const amp = Math.abs(evalAmp(sp.u, sp.v));
-          ctx.fillStyle = `hsla(${heatHue(amp)}, 100%, 75%, ${0.25 + tw * 0.6})`;
-          ctx.beginPath();
-          ctx.arc(base.x, base.y - tw * 8, sp.s * (1 + tw), 0, Math.PI * 2);
-          ctx.fill();
-        });
-
-        // Floating 3D callouts with plain-English labels
-        const anchors = [
-          { u: 0.5, v: 0.5, label: "Crystal" },
-          { u: 0.25, v: 0.28, label: "CPU Chip" },
-        ];
-        anchors.forEach((a) => {
-          const base = applyHomography(H, a.u, a.v);
-          const amp = Math.abs(evalAmp(a.u, a.v));
-          const safe = amp < 0.28;
-          const color = safe ? "#34D399" : "#FB7185";
-          const tag = `${a.label}: ${safe ? "Safe" : "High Vib"}`;
-
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 1.6;
-          ctx.beginPath();
-          ctx.moveTo(base.x, base.y);
-          ctx.lineTo(base.x, base.y - 28);
-          ctx.stroke();
-
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.arc(base.x, base.y, 4.5, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.font = "bold 10px Inter, sans-serif";
-          const wBox = ctx.measureText(tag).width + 14;
-          const bx = base.x - wBox / 2;
-          const by = base.y - 48;
-          ctx.fillStyle = "rgba(13,25,28,0.88)";
-          ctx.beginPath();
-          ctx.roundRect(bx, by, wBox, 19, 9);
-          ctx.fill();
-          ctx.strokeStyle = color;
-          ctx.stroke();
-          ctx.fillStyle = "#fff";
-          ctx.fillText(tag, bx + 7, by + 13);
-        });
+        // Bottom-center Laser Vibrometer Telemetry HUD Bar inside AR view
+        ctx.fillStyle = "rgba(10, 20, 23, 0.86)";
+        ctx.beginPath();
+        ctx.roundRect(46, 304, 268, 22, 7);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(34, 211, 238, 0.45)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = "#DDF0C2";
+        ctx.font = "bold 9px JetBrains Mono, monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(
+          `LDV MODE ${activeMode.label} // MAX DEFLECTION ±${maxDeflectionUm} µm // Q=${activeMode.qFactor}`,
+          180,
+          318
+        );
       }
 
       raf = requestAnimationFrame(draw);
@@ -650,7 +699,20 @@ export default function ChladniViewportPage() {
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [viewMode, cameraActive, activeMode.m, activeMode.n, activeMode.resonanceGain, plateGeo.aspectRatio, quad]);
+  }, [
+    viewMode,
+    arStyle,
+    arAnchorLocked,
+    cameraActive,
+    frequency,
+    activeMode.m,
+    activeMode.n,
+    activeMode.label,
+    activeMode.qFactor,
+    activeMode.resonanceGain,
+    plateGeo.aspectRatio,
+    quad,
+  ]);
 
   const toggleAudioDrive = async () => {
     if (isAudioOn) {
@@ -701,13 +763,13 @@ export default function ChladniViewportPage() {
         step="SCREEN 04 // 10"
         backHref="/material"
         rightAction={
-          <HudBadge variant={viewMode === "ar" && !arTargetVisible ? "warning" : "teal"} dot>
+          <HudBadge variant="teal" dot>
             {viewMode === "ar"
-              ? !cameraActive
-                ? "CAMERA OFF"
-                : arTargetVisible
-                ? "AR LOCKED"
-                : "NO TARGET"
+              ? arAnchorLocked
+                ? "AR QUAD LOCKED"
+                : arTargetVisible && cameraActive
+                ? "LIVE AR TRACKED"
+                : "SCANNED QUAD AR"
               : `${fps} FPS`}
           </HudBadge>
         }
@@ -715,6 +777,7 @@ export default function ChladniViewportPage() {
 
       <div className="p-4 space-y-3 flex-1 flex flex-col">
         <TestGuide kind="ar" open={guideOpen} onDone={() => setGuideOpen(false)} />
+
         {/* Main viewport — interactive pointer drag-to-orbit in 3D mode */}
         <div
           onPointerDown={(e) => {
@@ -757,7 +820,15 @@ export default function ChladniViewportPage() {
               }`}
             />
           )}
-          {viewMode === "ar" && !cameraActive && <div className="absolute inset-0 ar-grid-bg opacity-20" />}
+          {/* Fallback to scanned board photo if camera is unavailable during presentation */}
+          {viewMode === "ar" && !cameraActive && scanThumbUrl && (
+            <img
+              src={scanThumbUrl}
+              alt="Scanned workpiece background"
+              className="absolute inset-0 w-full h-full object-cover opacity-55 blur-[1px]"
+            />
+          )}
+          {viewMode === "ar" && !cameraActive && <div className="absolute inset-0 ar-grid-bg opacity-25" />}
 
           <canvas
             ref={canvasRef}
@@ -772,11 +843,11 @@ export default function ChladniViewportPage() {
 
           {/* Frequency pill */}
           <div className="absolute top-3 left-3 z-20 pointer-events-none">
-            <div className="bg-black/55 backdrop-blur-md px-3 py-1.5 rounded-2xl border border-white/15 flex items-center gap-2">
+            <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-2xl border border-white/15 flex items-center gap-2">
               <Radio className="w-4 h-4 text-cyan-300 animate-pulse" />
               <div className="leading-tight">
                 <span className="text-[9px] text-white/75 block font-semibold">
-                  {freqSource === "measured" ? "MIC MEASURED" : "THEORETICAL FEA"}
+                  {freqSource === "measured" ? "MIC MEASURED" : "KIRCHHOFF-LOVE FEA"}
                 </span>
                 <span className="text-sm font-extrabold text-white">{frequency} Hz</span>
               </div>
@@ -786,22 +857,64 @@ export default function ChladniViewportPage() {
             </div>
           </div>
 
-          {viewMode === "3d" && (
-            <div className="absolute top-3 right-3 z-20 pointer-events-none px-2 py-1 rounded-full bg-black/50 text-[9px] font-mono text-white/80">
-              DRAG TO ORBIT
-            </div>
-          )}
+          {/* Top-right AR / 3D physics controls */}
+          <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5">
+            {viewMode !== "2d" && (
+              <button
+                onClick={() => {
+                  setArStyle((s) => (s === "sand" ? "mesh" : "sand"));
+                  scatterSandGrains();
+                }}
+                className="px-2.5 py-1 rounded-full bg-black/60 border border-white/20 text-[10px] font-mono font-bold text-amber-200 hover:bg-black/80"
+                title="Toggle Chladni Sand Particles vs Mesh"
+              >
+                {arStyle === "sand" ? "SAND + LDV" : "FEA MESH"}
+              </button>
+            )}
+            {viewMode === "ar" && (
+              <button
+                onClick={() => setArAnchorLocked((v) => !v)}
+                className="p-1.5 rounded-full bg-black/60 border border-white/20 text-cyan-300 hover:bg-black/80"
+                title={arAnchorLocked ? "Unlock AR Quad Tracking" : "Lock AR Quad in Place"}
+              >
+                {arAnchorLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+              </button>
+            )}
+            {viewMode !== "2d" && (
+              <button
+                onClick={scatterSandGrains}
+                className="p-1.5 rounded-full bg-black/60 border border-white/20 text-white/90 hover:bg-black/80"
+                title="Re-scatter Chladni Sand Grains"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
 
-          {/* Hear it */}
-          <button
-            onClick={toggleAudioDrive}
-            className={`absolute bottom-3 left-3 z-20 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 backdrop-blur-md transition-colors ${
-              isAudioOn ? "brand-gradient text-white shadow-md" : "bg-white/15 text-white hover:bg-white/25"
-            }`}
-          >
-            {isAudioOn ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-            <span>{isAudioOn ? "Playing" : "Hear it"}</span>
-          </button>
+          {/* Bottom-left Audio & Live Mic Drive buttons */}
+          <div className="absolute bottom-3 left-3 z-20 flex items-center gap-1.5">
+            <button
+              onClick={toggleAudioDrive}
+              className={`px-2.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1 backdrop-blur-md transition-colors ${
+                isAudioOn ? "brand-gradient text-white shadow-md" : "bg-white/15 text-white hover:bg-white/25"
+              }`}
+            >
+              {isAudioOn ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+              <span>{isAudioOn ? "Tone On" : "Tone"}</span>
+            </button>
+
+            <button
+              onClick={toggleMicDrive}
+              className={`px-2.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1 backdrop-blur-md transition-colors ${
+                isMicDriveOn
+                  ? "bg-emerald-500 text-slate-950 shadow-md"
+                  : "bg-white/15 text-white hover:bg-white/25"
+              }`}
+            >
+              <Mic className="w-3.5 h-3.5" />
+              <span>{isMicDriveOn ? "Mic Live" : "Mic React"}</span>
+            </button>
+          </div>
 
           {/* View mode switcher */}
           <div className="absolute bottom-3 right-3 z-20 flex items-center gap-1.5">
@@ -822,6 +935,7 @@ export default function ChladniViewportPage() {
                   onClick={() => {
                     setFrequency(m.freqHz);
                     setFreqSource("theoretical");
+                    scatterSandGrains();
                   }}
                   className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-mono font-bold border transition-colors ${
                     selected
@@ -838,7 +952,9 @@ export default function ChladniViewportPage() {
 
         {/* Color legend */}
         <div className="flex items-center gap-2 px-1">
-          <span className="text-[11px] font-semibold text-slate-600 dark:text-[#8C999A]">Calm</span>
+          <span className="text-[11px] font-semibold text-slate-600 dark:text-[#8C999A]">
+            Nodal Line (Sand settles)
+          </span>
           <div
             className="flex-1 h-2.5 rounded-full"
             style={{
@@ -846,7 +962,9 @@ export default function ChladniViewportPage() {
                 "linear-gradient(90deg, hsl(185,100%,55%), hsl(120,100%,50%), hsl(60,100%,55%), hsl(0,100%,55%))",
             }}
           />
-          <span className="text-[11px] font-semibold text-slate-600 dark:text-[#8C999A]">Shaky</span>
+          <span className="text-[11px] font-semibold text-slate-600 dark:text-[#8C999A]">
+            Antinode Peak
+          </span>
         </div>
 
         {/* AI message */}
@@ -866,22 +984,22 @@ export default function ChladniViewportPage() {
           className="flex items-center justify-center gap-2"
         >
           <Sparkles className="w-5 h-5" />
-          <span>Solve Theoretical Mode & Excite</span>
+          <span>Excite Mode &amp; Migrate Chladni Sand</span>
         </HudButton>
 
-        {/* Advanced (hidden by default) */}
+        {/* Advanced manual slider */}
         <button
           onClick={() => setShowFineTune((v) => !v)}
           className="flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-[#8C999A]"
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
-          {showFineTune ? "Hide manual control" : "Manual fine-tune (optional)"}
+          {showFineTune ? "Hide manual control" : "Manual frequency sweep (optional)"}
         </button>
 
         {showFineTune && (
           <ChamferedCard className="p-4 space-y-2 pop-in">
             <div className="flex items-center justify-between text-sm font-bold">
-              <span>Frequency</span>
+              <span>Drive Frequency</span>
               <span className="brand-text">
                 {frequency} Hz · Mode {activeMode.label}
               </span>
@@ -892,7 +1010,9 @@ export default function ChladniViewportPage() {
               max="2500"
               step="5"
               value={frequency}
-              onChange={(e) => setFrequency(Number(e.target.value))}
+              onChange={(e) => {
+                setFrequency(Number(e.target.value));
+              }}
               className="w-full accent-sky-600 h-2 rounded-lg cursor-pointer"
             />
           </ChamferedCard>

@@ -15,6 +15,8 @@ export interface TapAnalysis {
   qFactor: number;
   snrDb: number;
   peaks: SpectralPeak[];
+  waveformPreview?: number[];
+  spectrumPreview?: { hz: number; mag: number }[];
 }
 
 export interface AmbientCalibrationProfile {
@@ -66,8 +68,9 @@ function fftInPlace(re: Float64Array, im: Float64Array): void {
 }
 
 /**
- * Transient impulse gate: checks RMS attack ratio AND crest factor (peak / rms >= 5.2)
- * so stationary Gaussian noise, speech, or fan hum does not false-trigger a tap.
+ * Transient impulse gate: checks RMS attack ratio AND crest factor (peak / rms >= 3.4)
+ * so finger/pen taps on phones, PCBs, acrylic, or metal plates trigger reliably
+ * while stationary background hum is ignored.
  */
 export function isSharpTapImpulse(samples: Float32Array, ambientRms: number): boolean {
   let sum = 0;
@@ -79,7 +82,7 @@ export function isSharpTapImpulse(samples: Float32Array, ambientRms: number): bo
   }
   const rms = Math.sqrt(sum / Math.max(1, samples.length));
   const crest = peak / Math.max(1e-6, rms);
-  return rms > Math.max(0.028, ambientRms * 4.5) && crest >= 5.2;
+  return rms > Math.max(0.014, ambientRms * 2.6) && crest >= 3.4;
 }
 
 /**
@@ -183,43 +186,51 @@ export function analyzeTapSignal(
     }
   }
 
-  // Physical Tap Decay Envelope Verification (reject continuous speech, fans, music)
+  // Physical Tap Decay Envelope Verification (reject continuous rising speech or steady hum)
   const ambFloor = ambientProfile?.ambientRms ?? 0.0025;
   if (peakIdx >= 192) {
     const preRms = windowRms(samples, peakIdx - 1024, peakIdx - 128);
     const attackRms = windowRms(samples, peakIdx - 32, peakIdx + 256);
-    if (attackRms / Math.max(preRms, ambFloor, 1e-5) < 4.2) {
+    if (attackRms / Math.max(preRms, ambFloor, 1e-5) < 2.2) {
       return null;
     }
   }
 
   const w1End = peakIdx + Math.round(0.025 * sampleRate);
-  const w2End = peakIdx + Math.round(0.065 * sampleRate);
-  const w3End = peakIdx + Math.round(0.13 * sampleRate);
-  if (samples.length >= w3End && w2End > w1End && w3End > w2End) {
+  const w3End = peakIdx + Math.round(0.12 * sampleRate);
+  if (samples.length >= w3End && w3End > w1End) {
     const rmsW1 = windowRms(samples, peakIdx, w1End);
-    const rmsW2 = windowRms(samples, w1End, w2End);
-    const rmsW3 = windowRms(samples, w2End, w3End);
-    if (rmsW1 <= rmsW2 * 1.12 || rmsW1 <= rmsW3 * 1.5) {
+    const rmsW3 = windowRms(samples, w1End, w3End);
+    if (rmsW1 <= rmsW3 * 1.15) {
       return null;
     }
   }
 
-  const startIdx = Math.max(0, peakIdx - 64);
+  // Focus FFT on the 85ms post-impact ring-down burst using a Half-Hann Impact Window
+  // (weight = 1.0 at the impact peak so transient tap energy is never muted by a symmetric Hann start!)
+  const preLead = 32;
+  const startIdx = Math.max(0, peakIdx - preLead);
   const aligned = samples.subarray(startIdx);
-  const usable = Math.min(aligned.length, 32768);
-  if (usable < 2048) return null;
+  const maxImpactLen = Math.min(aligned.length, Math.max(2048, Math.round(0.085 * sampleRate)));
+  const usable = maxImpactLen;
+  if (usable < 1024) return null;
 
   const N = 65536; // zero-padded size => ~0.7 Hz bins at 48 kHz
   const re = new Float64Array(N);
   const im = new Float64Array(N);
 
-  // remove DC and apply Hann window
+  // Remove DC and apply Half-Hann Force-Exponential Impact Window
   let mean = 0;
   for (let i = 0; i < usable; i++) mean += aligned[i];
   mean /= usable;
+  const flatTopEnd = Math.min(usable, Math.round(0.012 * sampleRate));
   for (let i = 0; i < usable; i++) {
-    const w = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (usable - 1)));
+    let w = 1.0;
+    if (i < preLead) {
+      w = 0.5 * (1 - Math.cos((Math.PI * i) / preLead));
+    } else if (i >= flatTopEnd) {
+      w = 0.5 * (1 + Math.cos((Math.PI * (i - flatTopEnd)) / Math.max(1, usable - flatTopEnd)));
+    }
     re[i] = (aligned[i] - mean) * w;
   }
 
@@ -236,7 +247,7 @@ export function analyzeTapSignal(
     let m = Math.sqrt(re[i] * re[i] + im[i] * im[i]);
     if (ambSpec && i < ambSpec.length) {
       // Spectral Pre-Whitening against stationary room/mic noise spectrum
-      m = Math.max(0, m - 1.4 * ambSpec[i] * ambScale);
+      m = Math.max(0, m - 1.15 * ambSpec[i] * ambScale);
     }
     if (isMobileMems) {
       const f = i * binHz;
@@ -268,7 +279,7 @@ export function analyzeTapSignal(
   const p75 = sorted[Math.floor(sorted.length * 0.75)];
   const medianVal = Math.max(rawMedian, p75 * 0.35, 1e-9);
   const snrDb = Math.round(20 * Math.log10(cand[0].m / medianVal));
-  if (snrDb < 13) return null;
+  if (snrDb < 8) return null;
 
   const refine = (i: number): number => {
     const a = Math.log(mag[i - 1] + 1e-18);
@@ -343,11 +354,36 @@ export function analyzeTapSignal(
     }
   }
 
+  // Build compact waveform & spectrum preview arrays for the live oscilloscope HUD
+  const waveformPreview: number[] = [];
+  const waveSpan = Math.min(aligned.length, Math.round(0.055 * sampleRate));
+  const wPeak = Math.max(1e-5, peakVal);
+  for (let k = 0; k < 120; k++) {
+    const idx = Math.min(aligned.length - 1, Math.floor((k / 120) * waveSpan));
+    waveformPreview.push(Math.max(-1, Math.min(1, (aligned[idx] - mean) / wPeak)));
+  }
+
+  const spectrumPreview: { hz: number; mag: number }[] = [];
+  const numBins = 64;
+  const maxMag = Math.max(1e-12, top.m);
+  for (let b = 0; b < numBins; b++) {
+    const bLo = Math.floor(lo + (b / numBins) * (hi - lo));
+    const bHi = Math.max(bLo + 1, Math.floor(lo + ((b + 1) / numBins) * (hi - lo)));
+    let localMax = 0;
+    for (let i = bLo; i < bHi && i <= hi; i++) {
+      if (mag[i] > localMax) localMax = mag[i];
+    }
+    const centerHz = Math.round(((bLo + bHi) * 0.5) * binHz);
+    spectrumPreview.push({ hz: centerHz, mag: Math.min(1, localMax / maxMag) });
+  }
+
   return {
     peakHz: Math.round(f0 * 10) / 10,
     qFactor: q,
     snrDb,
     peaks,
+    waveformPreview,
+    spectrumPreview,
   };
 }
 

@@ -527,7 +527,7 @@ export function detectQuadFromSource(
       varSum += dr * dr + dg * dg + db * db;
     }
     const colorStd = Math.sqrt(varSum / Math.max(1, 3 * statCount));
-    if (colorStd > 42) continue;
+    if (colorStd > 62) continue;
 
     // 4-Side Directional Caliper Projection within +-6px band around u0, u1, v0, v1
     const snapCaliperU = (baseU: number): number => {
@@ -642,9 +642,18 @@ export function detectQuadFromSource(
       sideSupport[side] = sideHits / samplesPerSide;
     }
     const edgeSupportRatio = supportedSamples / (4 * samplesPerSide);
-    const minSideReq = roiNorm ? 0.25 : 0.38;
-    const meanEdgeReq = roiNorm ? 0.38 : 0.52;
-    if (Math.min(...sideSupport) < minSideReq || edgeSupportRatio < meanEdgeReq) continue;
+    const sortedSides = [...sideSupport].sort((a, b) => a - b);
+    // Allow 1 side to be partially occluded by the holding hand while requiring 3 strong sides
+    const minWeakSide = roiNorm ? 0.14 : 0.18;
+    const minStrongSides = roiNorm ? 0.25 : 0.34;
+    const meanEdgeReq = roiNorm ? 0.34 : 0.44;
+    if (
+      sortedSides[0] < minWeakSide ||
+      sortedSides[1] < minStrongSides ||
+      edgeSupportRatio < meanEdgeReq
+    ) {
+      continue;
+    }
 
     const bgDiff = Math.abs(sr - bgR) + Math.abs(sg - bgG) + Math.abs(sb - bgB);
     const distToCenter = Math.hypot(centroidX - cxFrame, centroidY - cyFrame);
