@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
-import { Sparkles, ArrowRight } from "lucide-react";
+import { Cpu, ArrowRight } from "lucide-react";
 
 const SPLASH_EVENT = "harmonix:replay-splash";
-const SPLASH_SESSION_KEY = "harmonix_intro_played_v2";
+const SPLASH_SESSION_KEY = "harmonix_intro_played_v3";
 
 /** Trigger the Harmonix startup logo animation on demand (e.g., for live presentations). */
 export function triggerHarmonixSplash(): void {
@@ -20,17 +20,19 @@ interface HarmonixLogoProps {
 }
 
 const SIZE_MAP = {
-  sm: 28,
-  md: 36,
-  lg: 52,
-  xl: 116,
+  sm: 30,
+  md: 38,
+  lg: 54,
+  xl: 124,
 };
 
 /**
- * Unique HARMONIX Emblem:
- * - Inspired by Pinterest's continuous calligraphic monoline loop badge
- *   and Google's 4-color harmonic wave nodes (#38BDF8 Cyan, #E60023/#F43F5E Coral-Red,
- *   #FACC15 Amber-Gold, #0EB29A Emerald-Teal) fused with a 4-petal Chladni nodal rose.
+ * NVIDIA-Inspired Light-Theme HARMONIX Emblem:
+ * - Features NVIDIA's signature split-field contrast: a crisp Titanium-White left field
+ *   paired with an NVIDIA Volt-Green (#76B900 -> #0EB29A) right monolith block.
+ * - Sweeping logarithmic spiral "Acoustic Eye" blades invert across the split boundary
+ *   (Volt-Green spiral on the white field, Titanium-White spiral on the green block),
+ *   converging into a precision geometric 'H' resonator pupil at the center.
  */
 export const HarmonixLogo: React.FC<HarmonixLogoProps> = ({
   size = "md",
@@ -48,94 +50,126 @@ export const HarmonixLogo: React.FC<HarmonixLogoProps> = ({
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={`shrink-0 select-none ${className}`}
-      aria-label="Harmonix Logo"
+      aria-label="Harmonix NVIDIA-Inspired Logo"
     >
       <defs>
-        {/* Sculpted dark obsidian-teal studio squircle background */}
-        <linearGradient id={`bg-${uid}`} x1="10" y1="8" x2="112" y2="114" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#0F2026" />
-          <stop offset="55%" stopColor="#0A1418" />
-          <stop offset="100%" stopColor="#132A30" />
+        {/* NVIDIA Volt-Green -> Harmonix Emerald gradient for the split monolith & spiral */}
+        <linearGradient id={`nv-green-${uid}`} x1="16" y1="12" x2="108" y2="108" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#76B900" />
+          <stop offset="65%" stopColor="#58A600" />
+          <stop offset="100%" stopColor="#0EB29A" />
         </linearGradient>
 
-        {/* Google x Pinterest 4-tone harmonic ribbon gradient */}
-        <linearGradient id={`ribbon-${uid}`} x1="18" y1="22" x2="102" y2="98" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#F43F5E" />
-          <stop offset="34%" stopColor="#FACC15" />
-          <stop offset="68%" stopColor="#0EB29A" />
-          <stop offset="100%" stopColor="#38BDF8" />
+        {/* Crisp light-theme titanium card surface */}
+        <linearGradient id={`nv-light-${uid}`} x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#FFFFFF" />
+          <stop offset="100%" stopColor="#F1F5F9" />
         </linearGradient>
 
-        {/* Subtle nodal petal glow gradient */}
-        <linearGradient id={`rose-${uid}`} x1="24" y1="24" x2="96" y2="96" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#38BDF8" stopOpacity="0.55" />
-          <stop offset="50%" stopColor="#0EB29A" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="#F43F5E" stopOpacity="0.55" />
-        </linearGradient>
+        {/* Clip paths for left (White Field) and right (NVIDIA Green Block) split-field inversion */}
+        <clipPath id={`clip-left-${uid}`}>
+          <rect x="6" y="6" width="52" height="108" rx="4" />
+        </clipPath>
+        <clipPath id={`clip-right-${uid}`}>
+          <rect x="58" y="6" width="56" height="108" rx="22" />
+        </clipPath>
       </defs>
 
-      {/* Outer sculpted squircle badge */}
+      {/* Outer Light-Theme Precision Frame */}
       <rect
         x="4"
         y="4"
         width="112"
         height="112"
-        rx="30"
-        fill={`url(#bg-${uid})`}
-        stroke={`url(#ribbon-${uid})`}
-        strokeWidth="2.8"
+        rx="24"
+        fill={`url(#nv-light-${uid})`}
+        stroke="#CBD5E1"
+        strokeWidth="2.2"
       />
 
-      {/* Fine Chladni resonant ring */}
-      <circle
-        cx="60"
-        cy="60"
-        r="43"
-        stroke="rgba(255,255,255,0.09)"
-        strokeWidth="1.2"
-        strokeDasharray="4 4"
-      />
-
-      {/* 4-Petal Chladni Standing-Wave Nodal Rose */}
+      {/* Right-Half NVIDIA Volt-Green Split Monolith */}
       <path
-        d="M60 19 C73 39, 81 47, 101 60 C81 73, 73 81, 60 101 C47 81, 39 73, 19 60 C39 47, 47 39, 60 19 Z"
-        stroke={`url(#rose-${uid})`}
-        strokeWidth="1.8"
-        fill="rgba(14, 178, 154, 0.05)"
+        d="M58 6 H92 C104.15 6 114 15.85 114 28 V92 C114 104.15 104.15 114 92 114 H58 V6 Z"
+        fill={`url(#nv-green-${uid})`}
       />
 
-      {/* Pinterest-inspired Continuous Monoline Calligraphic 'H' + Standing Wave Bridge */}
-      <path
-        d="M44 37 C34 26, 23 36, 33 48 C37 52, 37 58, 37 89 M37 31 L37 89 M37 61 C47 46, 54 46, 60 60 C66 74, 73 74, 83 59 M83 31 L83 89 C83 96, 94 92, 92 82"
-        stroke={`url(#ribbon-${uid})`}
-        strokeWidth="7.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        style={
-          animated
-            ? {
-                strokeDasharray: 340,
-                strokeDashoffset: 0,
-                animation: "harmonixRibbonDraw 1.5s cubic-bezier(0.22, 1, 0.36, 1) forwards",
-              }
-            : undefined
-        }
-      />
+      {/* Left-Half (White Field): Volt-Green Logarithmic Eye Spiral & Acoustic Blades */}
+      <g clipPath={`url(#clip-left-${uid})`}>
+        {/* Outer sweeping eye-vortex arc */}
+        <path
+          d="M96 60 C84 26, 36 22, 16 56 C28 38, 66 36, 84 60 C68 78, 36 76, 22 58 C34 86, 76 88, 96 60 Z"
+          fill={`url(#nv-green-${uid})`}
+        />
+        {/* Inner logarithmic spiral claw */}
+        <path
+          d="M84 60 C72 36, 36 38, 24 60 C34 48, 60 48, 72 60 C62 72, 38 70, 28 60"
+          stroke={`url(#nv-green-${uid})`}
+          strokeWidth="6.5"
+          strokeLinecap="round"
+          style={
+            animated
+              ? {
+                  strokeDasharray: 220,
+                  strokeDashoffset: 0,
+                  animation: "nvSpiralDraw 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+                }
+              : undefined
+          }
+        />
+        {/* Precision Dark-Graphite 'H' Left Pillar + Resonant Crossbar */}
+        <path
+          d="M42 41 V79 M42 60 H58"
+          stroke="#0F172A"
+          strokeWidth="6.5"
+          strokeLinecap="round"
+        />
+      </g>
 
-      {/* 4 Google-inspired Harmonic Antinode Dots (Blue, Coral-Red, Amber-Gold, Emerald) */}
-      <circle cx="60" cy="24" r="4.6" fill="#38BDF8" />
-      <circle cx="96" cy="60" r="4.6" fill="#F43F5E" />
-      <circle cx="60" cy="96" r="4.6" fill="#FACC15" />
-      <circle cx="24" cy="60" r="4.6" fill="#0EB29A" />
+      {/* Right-Half (Volt-Green Monolith): Inverted Titanium-White Eye Spiral & Acoustic Blades */}
+      <g clipPath={`url(#clip-right-${uid})`}>
+        {/* Outer sweeping white eye-vortex arc */}
+        <path
+          d="M20 60 C34 26, 84 22, 104 58 C90 38, 52 36, 34 60 C50 78, 84 76, 98 58 C86 88, 42 88, 20 60 Z"
+          fill="#FFFFFF"
+        />
+        {/* Inner inverted white logarithmic spiral claw */}
+        <path
+          d="M34 60 C46 38, 82 38, 94 60 C84 48, 58 48, 46 60 C56 72, 80 70, 90 60"
+          stroke="#FFFFFF"
+          strokeWidth="6.5"
+          strokeLinecap="round"
+          style={
+            animated
+              ? {
+                  strokeDasharray: 220,
+                  strokeDashoffset: 0,
+                  animation: "nvSpiralDraw 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+                }
+              : undefined
+          }
+        />
+        {/* Precision White 'H' Right Pillar + Resonant Crossbar */}
+        <path
+          d="M74 41 V79 M58 60 H74"
+          stroke="#FFFFFF"
+          strokeWidth="6.5"
+          strokeLinecap="round"
+        />
+      </g>
+
+      {/* Central Acoustic Core Iris Node */}
+      <circle cx="58" cy="60" r="5.5" fill="#0F172A" stroke="#FFFFFF" strokeWidth="2.2" />
     </svg>
   );
 };
 
 /**
- * Full-Screen Startup Logo Animation:
- * Phase 1: 4 Google-inspired harmonic dots oscillate in a standing wave, then converge into the 4 Chladni antinodes.
- * Phase 2: Pinterest-inspired continuous monoline ribbon draws the sculptural H + Chladni nodal rose.
- * Phase 3: Kinetic brand typography reveal ("HARMONIX // ACOUSTIC CHLADNI & NDT STUDIO") -> smooth dissolve into app.
+ * Full-Screen Light-Theme NVIDIA-Inspired Startup Animation:
+ * - Pure Titanium-White & Alabaster studio backdrop (#FFFFFF -> #F4F9F0)
+ * - Phase 1: The split-field NVIDIA Volt-Green monolith locks into place with a razor-sharp vertical seam.
+ * - Phase 2: Counter-balanced logarithmic spiral eye blades sweep across the white/green split boundary,
+ *   forging the central 'H' acoustic core and emitting two crisp Volt-Green harmonic shockwaves.
+ * - Phase 3: High-contrast industrial typography reveal ("HARMONIX // ACCELERATED ACOUSTIC & NDT AI").
  */
 export const HarmonixSplash: React.FC = () => {
   const [visible, setVisible] = useState<boolean>(false);
@@ -150,7 +184,7 @@ export const HarmonixSplash: React.FC = () => {
     setTimeout(() => {
       setVisible(false);
       setExiting(false);
-    }, 380);
+    }, 360);
   }, []);
 
   const startSplash = useCallback(() => {
@@ -174,7 +208,7 @@ export const HarmonixSplash: React.FC = () => {
     if (!visible) return;
     const timer = setTimeout(() => {
       closeSplash();
-    }, 3100);
+    }, 3000);
     return () => clearTimeout(timer);
   }, [visible, runKey, closeSplash]);
 
@@ -183,253 +217,255 @@ export const HarmonixSplash: React.FC = () => {
   return (
     <div
       key={runKey}
-      className={`fixed inset-0 z-[120] flex flex-col items-center justify-between p-6 bg-[#071114] text-white select-none transition-opacity duration-350 ${
+      className={`fixed inset-0 z-[120] flex flex-col items-center justify-between p-6 bg-gradient-to-b from-white via-[#F8FBF6] to-[#EEF5E9] text-slate-900 select-none transition-opacity duration-350 ${
         exiting ? "opacity-0 pointer-events-none" : "opacity-100"
       }`}
     >
       <style>{`
-        @keyframes harmonixRibbonDraw {
-          0% { stroke-dashoffset: 340; opacity: 0.2; }
-          25% { opacity: 1; }
-          100% { stroke-dashoffset: 0; opacity: 1; }
+        @keyframes nvMonolithSlide {
+          0% { transform: translateX(36px) scaleX(0.7); opacity: 0; }
+          100% { transform: translateX(0px) scaleX(1); opacity: 1; }
         }
-        @keyframes harmonixRoseDraw {
-          0% { stroke-dashoffset: 260; transform: scale(0.78) rotate(-18deg); opacity: 0; }
-          40% { opacity: 1; }
+        @keyframes nvSpiralSweep {
+          0% { stroke-dashoffset: 240; transform: scale(0.84) rotate(-22deg); opacity: 0; }
+          35% { opacity: 1; }
           100% { stroke-dashoffset: 0; transform: scale(1) rotate(0deg); opacity: 1; }
         }
-        @keyframes harmonixRingPulse {
-          0% { transform: scale(0.72); opacity: 0; }
-          45% { opacity: 0.55; }
-          100% { transform: scale(1.38); opacity: 0; }
+        @keyframes nvEyeBladeReveal {
+          0% { transform: scale(0.68) rotate(-14deg); opacity: 0; }
+          50% { transform: scale(1.04) rotate(2deg); opacity: 1; }
+          100% { transform: scale(1) rotate(0deg); opacity: 1; }
         }
-        @keyframes harmonixBadgePop {
-          0% { transform: scale(0.82); opacity: 0; }
-          45% { transform: scale(1.03); opacity: 1; }
+        @keyframes nvCorePop {
+          0% { transform: scale(0); opacity: 0; }
+          70% { transform: scale(1.18); opacity: 1; }
           100% { transform: scale(1); opacity: 1; }
         }
-        @keyframes harmonixDotTop {
-          0% { transform: translate(-27px, 36px) scale(1.25); }
-          30% { transform: translate(-27px, 22px) scale(1.1); }
-          55% { transform: translate(-27px, 44px) scale(1.1); }
-          100% { transform: translate(0px, 0px) scale(1); }
+        @keyframes nvShockwave {
+          0% { transform: scale(0.76); opacity: 0.75; }
+          100% { transform: scale(1.42); opacity: 0; }
         }
-        @keyframes harmonixDotRight {
-          0% { transform: translate(-45px, 0px) scale(1.25); }
-          30% { transform: translate(-45px, 14px) scale(1.1); }
-          55% { transform: translate(-45px, -12px) scale(1.1); }
-          100% { transform: translate(0px, 0px) scale(1); }
-        }
-        @keyframes harmonixDotBottom {
-          0% { transform: translate(9px, -36px) scale(1.25); }
-          30% { transform: translate(9px, -50px) scale(1.1); }
-          55% { transform: translate(9px, -24px) scale(1.1); }
-          100% { transform: translate(0px, 0px) scale(1); }
-        }
-        @keyframes harmonixDotLeft {
-          0% { transform: translate(63px, 0px) scale(1.25); }
-          30% { transform: translate(63px, -14px) scale(1.1); }
-          55% { transform: translate(63px, 12px) scale(1.1); }
-          100% { transform: translate(0px, 0px) scale(1); }
-        }
-        @keyframes harmonixTextRise {
-          0% { transform: translateY(14px); opacity: 0; }
+        @keyframes nvTextSlideUp {
+          0% { transform: translateY(16px); opacity: 0; }
           100% { transform: translateY(0px); opacity: 1; }
         }
-        @keyframes harmonixBarSweep {
+        @keyframes nvBarProgress {
           0% { width: 0%; }
           100% { width: 100%; }
         }
       `}</style>
 
-      {/* Top studio header bar */}
-      <div className="w-full max-w-[420px] flex items-center justify-between text-[11px] font-mono text-slate-400">
-        <span className="flex items-center gap-1.5 text-[#0EB29A] font-semibold">
-          <Sparkles className="w-3.5 h-3.5" />
-          HARMONIX STUDIO
+      {/* Subtle architectural micro-grid overlay */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-45"
+        style={{
+          backgroundImage:
+            "linear-gradient(to right, rgba(118,185,0,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(118,185,0,0.08) 1px, transparent 1px)",
+          backgroundSize: "28px 28px",
+        }}
+      />
+
+      {/* Top Light-Theme Studio Bar */}
+      <div className="relative z-10 w-full max-w-[420px] flex items-center justify-between text-[11px] font-mono">
+        <span className="flex items-center gap-1.5 text-[#58A600] font-extrabold tracking-wider">
+          <Cpu className="w-3.5 h-3.5 text-[#76B900]" />
+          HARMONIX // ACCELERATED AI
         </span>
         <button
           type="button"
           onClick={closeSplash}
-          className="px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 text-white text-[11px] font-semibold flex items-center gap-1 transition-colors"
+          className="px-3.5 py-1 rounded-full bg-slate-900/5 hover:bg-slate-900/10 border border-slate-300 text-slate-800 text-[11px] font-bold flex items-center gap-1 transition-colors"
         >
           <span>Skip</span>
           <ArrowRight className="w-3 h-3" />
         </button>
       </div>
 
-      {/* Center Animated Emblem Stage */}
-      <div className="relative flex flex-col items-center justify-center my-auto">
-        {/* Ambient multi-color studio aura */}
+      {/* Center Animated NVIDIA-Inspired Split-Field Spiral Stage */}
+      <div className="relative z-10 flex flex-col items-center justify-center my-auto">
+        {/* Soft NVIDIA Volt-Green radial studio glow */}
         <div
-          className="absolute w-64 h-64 rounded-full blur-3xl pointer-events-none opacity-45"
+          className="absolute w-72 h-72 rounded-full blur-3xl pointer-events-none"
           style={{
             background:
-              "radial-gradient(circle, rgba(56,189,248,0.35) 0%, rgba(244,63,94,0.25) 45%, rgba(14,178,154,0.2) 75%, transparent 100%)",
+              "radial-gradient(circle, rgba(118,185,0,0.24) 0%, rgba(14,178,154,0.12) 52%, transparent 75%)",
           }}
         />
 
-        {/* Animated SVG Masterpiece */}
-        <div
-          className="relative w-40 h-40 flex items-center justify-center"
-          style={{ animation: "harmonixBadgePop 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards" }}
-        >
-          {/* Expanding Chladni acoustic resonance wave ring */}
+        <div className="relative w-44 h-44 flex items-center justify-center">
+          {/* Expanding Volt-Green ultrasonic pulse ring */}
           <div
-            className="absolute inset-2 rounded-[38px] border-2 border-[#0EB29A]/50 pointer-events-none"
-            style={{ animation: "harmonixRingPulse 1.8s ease-out 0.55s infinite" }}
+            className="absolute inset-3 rounded-[34px] border-2 border-[#76B900]/55 pointer-events-none"
+            style={{ animation: "nvShockwave 1.6s cubic-bezier(0.16, 1, 0.3, 1) 0.45s infinite" }}
           />
 
           <svg
-            width="148"
-            height="148"
+            width="156"
+            height="156"
             viewBox="0 0 120 120"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
-            className="relative z-10 drop-shadow-[0_16px_36px_rgba(14,178,154,0.28)]"
+            className="relative z-10 drop-shadow-[0_18px_38px_rgba(118,185,0,0.22)]"
           >
             <defs>
-              <linearGradient id="splash-bg" x1="10" y1="8" x2="112" y2="114" gradientUnits="userSpaceOnUse">
-                <stop offset="0%" stopColor="#102329" />
-                <stop offset="55%" stopColor="#0A1418" />
-                <stop offset="100%" stopColor="#152F36" />
+              <linearGradient id="splash-nv-green" x1="16" y1="10" x2="110" y2="110" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#76B900" />
+                <stop offset="65%" stopColor="#58A600" />
+                <stop offset="100%" stopColor="#0EB29A" />
               </linearGradient>
-              <linearGradient id="splash-ribbon" x1="18" y1="22" x2="102" y2="98" gradientUnits="userSpaceOnUse">
-                <stop offset="0%" stopColor="#F43F5E" />
-                <stop offset="34%" stopColor="#FACC15" />
-                <stop offset="68%" stopColor="#0EB29A" />
-                <stop offset="100%" stopColor="#38BDF8" />
-              </linearGradient>
-              <linearGradient id="splash-rose" x1="20" y1="20" x2="100" y2="100" gradientUnits="userSpaceOnUse">
-                <stop offset="0%" stopColor="#38BDF8" stopOpacity="0.7" />
-                <stop offset="50%" stopColor="#0EB29A" stopOpacity="0.45" />
-                <stop offset="100%" stopColor="#F43F5E" stopOpacity="0.7" />
-              </linearGradient>
+              <clipPath id="splash-clip-left">
+                <rect x="6" y="6" width="52" height="108" rx="4" />
+              </clipPath>
+              <clipPath id="splash-clip-right">
+                <rect x="58" y="6" width="56" height="108" rx="22" />
+              </clipPath>
             </defs>
 
-            {/* Sculpted Squircle Frame */}
+            {/* Pure Titanium-White Studio Squircle Base */}
             <rect
               x="4"
               y="4"
               width="112"
               height="112"
-              rx="30"
-              fill="url(#splash-bg)"
-              stroke="url(#splash-ribbon)"
-              strokeWidth="2.8"
+              rx="24"
+              fill="#FFFFFF"
+              stroke="#CBD5E1"
+              strokeWidth="2.2"
             />
 
-            {/* Architectural Compass Ring */}
-            <circle
-              cx="60"
-              cy="60"
-              r="43"
-              stroke="rgba(255,255,255,0.12)"
-              strokeWidth="1.2"
-              strokeDasharray="4 4"
-            />
-
-            {/* 4-Petal Chladni Nodal Rose (draws in & rotates into place) */}
+            {/* Right-Half NVIDIA Volt-Green Split Monolith (slides & locks in) */}
             <path
-              d="M60 19 C73 39, 81 47, 101 60 C81 73, 73 81, 60 101 C47 81, 39 73, 19 60 C39 47, 47 39, 60 19 Z"
-              stroke="url(#splash-rose)"
-              strokeWidth="2"
-              fill="rgba(14, 178, 154, 0.06)"
+              d="M58 6 H92 C104.15 6 114 15.85 114 28 V92 C114 104.15 104.15 114 92 114 H58 V6 Z"
+              fill="url(#splash-nv-green)"
               style={{
-                transformOrigin: "60px 60px",
-                strokeDasharray: 260,
-                strokeDashoffset: 260,
-                animation: "harmonixRoseDraw 1.25s cubic-bezier(0.22, 1, 0.36, 1) 0.35s forwards",
+                transformOrigin: "86px 60px",
+                animation: "nvMonolithSlide 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards",
               }}
             />
 
-            {/* Pinterest-Inspired Continuous Monoline Calligraphic 'H' + Standing Wave Bridge */}
-            <path
-              d="M44 37 C34 26, 23 36, 33 48 C37 52, 37 58, 37 89 M37 31 L37 89 M37 61 C47 46, 54 46, 60 60 C66 74, 73 74, 83 59 M83 31 L83 89 C83 96, 94 92, 92 82"
-              stroke="url(#splash-ribbon)"
-              strokeWidth="7.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{
-                strokeDasharray: 340,
-                strokeDashoffset: 340,
-                animation: "harmonixRibbonDraw 1.45s cubic-bezier(0.22, 1, 0.36, 1) 0.55s forwards",
-              }}
-            />
+            {/* Left Half (White Field): Volt-Green Logarithmic Eye Spiral & Acoustic Vortex */}
+            <g clipPath="url(#splash-clip-left)">
+              <path
+                d="M96 60 C84 26, 36 22, 16 56 C28 38, 66 36, 84 60 C68 78, 36 76, 22 58 C34 86, 76 88, 96 60 Z"
+                fill="url(#splash-nv-green)"
+                style={{
+                  transformOrigin: "58px 60px",
+                  animation: "nvEyeBladeReveal 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both",
+                }}
+              />
+              <path
+                d="M84 60 C72 36, 36 38, 24 60 C34 48, 60 48, 72 60 C62 72, 38 70, 28 60"
+                stroke="url(#splash-nv-green)"
+                strokeWidth="6.5"
+                strokeLinecap="round"
+                style={{
+                  transformOrigin: "58px 60px",
+                  strokeDasharray: 240,
+                  strokeDashoffset: 240,
+                  animation: "nvSpiralSweep 1.15s cubic-bezier(0.16, 1, 0.3, 1) 0.35s forwards",
+                }}
+              />
+              <path
+                d="M42 41 V79 M42 60 H58"
+                stroke="#0F172A"
+                strokeWidth="6.5"
+                strokeLinecap="round"
+                style={{
+                  transformOrigin: "50px 60px",
+                  animation: "nvCorePop 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.65s both",
+                }}
+              />
+            </g>
 
-            {/* Google-Inspired 4 Harmonic Dots that oscillate in a line then lock into the 4 Chladni Antinodes */}
+            {/* Right Half (Volt-Green Monolith): Inverted White Eye Spiral & Acoustic Vortex */}
+            <g clipPath="url(#splash-clip-right)">
+              <path
+                d="M20 60 C34 26, 84 22, 104 58 C90 38, 52 36, 34 60 C50 78, 84 76, 98 58 C86 88, 42 88, 20 60 Z"
+                fill="#FFFFFF"
+                style={{
+                  transformOrigin: "58px 60px",
+                  animation: "nvEyeBladeReveal 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.28s both",
+                }}
+              />
+              <path
+                d="M34 60 C46 38, 82 38, 94 60 C84 48, 58 48, 46 60 C56 72, 80 70, 90 60"
+                stroke="#FFFFFF"
+                strokeWidth="6.5"
+                strokeLinecap="round"
+                style={{
+                  transformOrigin: "58px 60px",
+                  strokeDasharray: 240,
+                  strokeDashoffset: 240,
+                  animation: "nvSpiralSweep 1.15s cubic-bezier(0.16, 1, 0.3, 1) 0.42s forwards",
+                }}
+              />
+              <path
+                d="M74 41 V79 M58 60 H74"
+                stroke="#FFFFFF"
+                strokeWidth="6.5"
+                strokeLinecap="round"
+                style={{
+                  transformOrigin: "66px 60px",
+                  animation: "nvCorePop 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.72s both",
+                }}
+              />
+            </g>
+
+            {/* Central Acoustic Eye Iris Node */}
             <circle
-              cx="60"
-              cy="24"
-              r="5.2"
-              fill="#38BDF8"
-              style={{ animation: "harmonixDotTop 0.95s cubic-bezier(0.22, 1, 0.36, 1) forwards" }}
-            />
-            <circle
-              cx="96"
+              cx="58"
               cy="60"
-              r="5.2"
-              fill="#F43F5E"
-              style={{ animation: "harmonixDotRight 0.95s cubic-bezier(0.22, 1, 0.36, 1) forwards" }}
-            />
-            <circle
-              cx="60"
-              cy="96"
-              r="5.2"
-              fill="#FACC15"
-              style={{ animation: "harmonixDotBottom 0.95s cubic-bezier(0.22, 1, 0.36, 1) forwards" }}
-            />
-            <circle
-              cx="24"
-              cy="60"
-              r="5.2"
-              fill="#0EB29A"
-              style={{ animation: "harmonixDotLeft 0.95s cubic-bezier(0.22, 1, 0.36, 1) forwards" }}
+              r="5.8"
+              fill="#0F172A"
+              stroke="#FFFFFF"
+              strokeWidth="2.4"
+              style={{
+                transformOrigin: "58px 60px",
+                animation: "nvCorePop 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.8s both",
+              }}
             />
           </svg>
         </div>
 
-        {/* Kinetic Brand Typography Reveal */}
+        {/* High-Contrast Light-Theme NVIDIA-Style Typography Reveal */}
         <div
           className="mt-6 text-center space-y-2"
           style={{
             opacity: 0,
-            animation: "harmonixTextRise 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.85s forwards",
+            animation: "nvTextSlideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.75s forwards",
           }}
         >
-          <div className="flex items-center justify-center gap-2">
-            <span className="text-3xl font-black tracking-[0.14em] bg-gradient-to-r from-white via-[#DDF0C2] to-[#38BDF8] bg-clip-text text-transparent">
+          <div className="flex items-center justify-center gap-2.5">
+            <span className="text-3xl font-black tracking-[0.16em] text-slate-900">
               HARMONIX
             </span>
-            <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#0EB29A]/20 border border-[#0EB29A]/50 text-[#4ADE80]">
-              AR
+            <span className="text-[11px] font-mono font-extrabold px-2.5 py-0.5 rounded bg-[#76B900] text-white shadow-sm">
+              AR // AI
             </span>
           </div>
 
-          {/* 4-Color Google-inspired harmonic divider bar */}
-          <div className="flex items-center justify-center gap-1.5 pt-0.5">
-            <span className="w-5 h-1 rounded-full bg-[#38BDF8]" />
-            <span className="w-5 h-1 rounded-full bg-[#F43F5E]" />
-            <span className="w-5 h-1 rounded-full bg-[#FACC15]" />
-            <span className="w-5 h-1 rounded-full bg-[#0EB29A]" />
+          {/* Crisp NVIDIA Volt-Green split accent bar */}
+          <div className="flex items-center justify-center gap-1 pt-0.5">
+            <span className="w-10 h-1 rounded-l-full bg-slate-900" />
+            <span className="w-14 h-1 rounded-r-full bg-gradient-to-r from-[#76B900] to-[#0EB29A]" />
           </div>
 
-          <p className="text-[11px] font-mono tracking-[0.22em] text-slate-400 uppercase pt-1">
-            Acoustic Chladni &amp; Non-Destructive AI
+          <p className="text-[11px] font-mono font-semibold tracking-[0.2em] text-slate-600 uppercase pt-1">
+            Accelerated Acoustic &amp; Chladni NDT
           </p>
         </div>
       </div>
 
-      {/* Bottom smooth progress bar */}
-      <div className="w-full max-w-[260px] space-y-2 pb-2">
-        <div className="h-1 w-full rounded-full bg-white/10 overflow-hidden">
+      {/* Bottom Light-Theme Volt-Green Progress Bar */}
+      <div className="relative z-10 w-full max-w-[260px] space-y-2 pb-2">
+        <div className="h-1.5 w-full rounded-full bg-slate-200 overflow-hidden border border-slate-300/60">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-[#F43F5E] via-[#FACC15] to-[#0EB29A]"
-            style={{ animation: "harmonixBarSweep 2.9s cubic-bezier(0.22, 1, 0.36, 1) forwards" }}
+            className="h-full rounded-full bg-gradient-to-r from-[#76B900] via-[#58A600] to-[#0EB29A]"
+            style={{ animation: "nvBarProgress 2.8s cubic-bezier(0.22, 1, 0.36, 1) forwards" }}
           />
         </div>
-        <div className="text-center text-[10px] font-mono text-slate-400 tracking-wider">
-          INITIALIZING CYMATIC &amp; CV ENGINE…
+        <div className="text-center text-[10px] font-mono font-bold text-slate-500 tracking-wider">
+          LOADING WEBGPU &amp; ACOUSTIC ENGINE…
         </div>
       </div>
     </div>
