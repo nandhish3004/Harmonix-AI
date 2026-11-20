@@ -7,6 +7,7 @@ import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { HarmonixLogo, triggerHarmonixSplash } from "@/components/ui/HarmonixLogo";
 import { createClient } from "@/utils/supabase/client";
 
 interface LanguageOption {
@@ -66,10 +67,22 @@ export default function LanguageSelectionPage() {
       {/* Top Header telemetry */}
       <div className="space-y-6">
         <div className="flex items-center justify-between text-xs font-mono text-slate-500 dark:text-[#8C999A]">
-          <div className="flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-sky-600 dark:text-[#0EB29A]" />
-            <span className="tracking-widest text-slate-800 dark:text-[#0EB29A] font-semibold">HARMONIX-AR OS</span>
-          </div>
+          <button
+            type="button"
+            onClick={triggerHarmonixSplash}
+            title="Replay Harmonix Intro Animation"
+            className="flex items-center gap-2.5 group text-left"
+          >
+            <HarmonixLogo size="md" />
+            <div>
+              <span className="block tracking-widest text-slate-900 dark:text-[#F5FDFF] font-extrabold">
+                HARMONIX-AR
+              </span>
+              <span className="block text-[9px] tracking-wider text-sky-600 dark:text-[#0EB29A]">
+                TAP LOGO TO REPLAY INTRO
+              </span>
+            </div>
+          </button>
           <div className="flex items-center gap-2">
             <ThemeToggle />
             <HudBadge variant="teal" dot>

@@ -328,55 +328,47 @@ export default function WorkpieceScanPage() {
             }
 
             if (fullBlob) {
-              const det = await detectBoardHF(fullBlob, cropBlob);
-              if (det) {
-                if (typeof window !== "undefined" && det.materialId) {
-                  localStorage.setItem("harmonix_hf_material", det.materialId);
-                  localStorage.setItem("harmonix_hf_material_label", det.label);
-                }
+              // Only classify material if a real 4-sided workpiece contour was verified by CV (snapped)
+              // or if YOLOS object detector returns an explicit foreground object bounding box
+              const det = await detectBoardHF(fullBlob, snapped ? cropBlob : undefined);
+              if (det && (snapped || det.boxNorm || det.box)) {
+                let validObjectFound = snapped;
                 if (det.boxNorm) {
                   const roiSnapped = detectInRoi(det.boxNorm);
-                  if (!roiSnapped) {
-                    const x0 = Math.max(8, Math.round(det.boxNorm.xmin * cw));
-                    const y0 = Math.max(8, Math.round(det.boxNorm.ymin * ch));
-                    const x1 = Math.min(cw - 8, Math.round(det.boxNorm.xmax * cw));
-                    const y1 = Math.min(ch - 8, Math.round(det.boxNorm.ymax * ch));
-                    if (x1 - x0 > 32 && y1 - y0 > 32) {
-                      setCornersFromAi([
-                        { x: x0, y: y0, label: "P1" },
-                        { x: x1, y: y0, label: "P2" },
-                        { x: x1, y: y1, label: "P3" },
-                        { x: x0, y: y1, label: "P4" },
-                      ]);
-                    }
+                  if (roiSnapped) {
+                    validObjectFound = true;
                   }
-                } else if (!snapped) {
-                  if (det.box) {
-                    const kx = cw / fullCanvas.width;
-                    const ky = ch / fullCanvas.height;
-                    const x0 = Math.max(8, Math.round(det.box.xmin * kx));
-                    const y0 = Math.max(8, Math.round(det.box.ymin * ky));
-                    const x1 = Math.min(cw - 8, Math.round(det.box.xmax * kx));
-                    const y1 = Math.min(ch - 8, Math.round(det.box.ymax * ky));
-                    if (x1 - x0 > 40 && y1 - y0 > 40) {
-                      setCornersFromAi([
-                        { x: x0, y: y0, label: "P1" },
-                        { x: x1, y: y0, label: "P2" },
-                        { x: x1, y: y1, label: "P3" },
-                        { x: x0, y: y1, label: "P4" },
-                      ]);
-                    }
-                  } else {
-                    detectOnce();
+                } else if (!snapped && det.box) {
+                  const kx = cw / fullCanvas.width;
+                  const ky = ch / fullCanvas.height;
+                  const x0 = Math.max(8, Math.round(det.box.xmin * kx));
+                  const y0 = Math.max(8, Math.round(det.box.ymin * ky));
+                  const x1 = Math.min(cw - 8, Math.round(det.box.xmax * kx));
+                  const y1 = Math.min(ch - 8, Math.round(det.box.ymax * ky));
+                  if (x1 - x0 > 40 && y1 - y0 > 40 && x1 - x0 < cw * 0.85 && y1 - y0 < ch * 0.85) {
+                    setCornersFromAi([
+                      { x: x0, y: y0, label: "P1" },
+                      { x: x1, y: y0, label: "P2" },
+                      { x: x1, y: y1, label: "P3" },
+                      { x: x0, y: y1, label: "P4" },
+                    ]);
+                    validObjectFound = true;
                   }
                 }
-                setAiEngine(`Hugging Face · ${det.model.split("/").pop()}`);
-                setScanMessage(
-                  `Hugging Face detected "${det.label}" (${Math.round(det.score * 100)}% confidence).`
-                );
-                void speak("I found your board.", { interrupt: false });
-                setTimeout(() => setScanMessage(null), 4000);
-                return;
+
+                if (validObjectFound) {
+                  if (typeof window !== "undefined" && det.materialId) {
+                    localStorage.setItem("harmonix_hf_material", det.materialId);
+                    localStorage.setItem("harmonix_hf_material_label", det.label);
+                  }
+                  setAiEngine(`Hugging Face · ${det.model.split("/").pop()}`);
+                  setScanMessage(
+                    `Hugging Face verified "${det.label}" (${Math.round(det.score * 100)}% confidence).`
+                  );
+                  void speak("I found your board.", { interrupt: false });
+                  setTimeout(() => setScanMessage(null), 4000);
+                  return;
+                }
               }
             }
           }
@@ -391,7 +383,9 @@ export default function WorkpieceScanPage() {
         } else if (!cameraActive && !uploadedImageUrl) {
           setScanMessage("No camera/photo yet — click SAMPLE or PHOTO below.");
         } else {
-          setScanMessage("Low contrast — place board flat on a plain desk or drag P1–P4.");
+          setScanMessage(
+            "No physical board or object detected in view — hold your workpiece clearly inside the frame away from walls."
+          );
         }
       } else {
         setScanMessage("Workpiece contour snapped (on-device CV).");

@@ -405,13 +405,13 @@ export function detectQuadFromSource(
     const minAreaRequired = roiNorm ? Math.max(total * 0.015, roiBoxArea * 0.14) : total * 0.035;
     if (areaCount < minAreaRequired) continue;
 
-    // Reject regions touching 2 or more outer borders of the frame (walls, shirts, tables)
+    // Reject regions touching ANY outer border of the frame (walls, ceilings, doors, shirts, tables)
     let bordersTouched = 0;
-    if (minX <= 5) bordersTouched++;
-    if (maxX >= procW - 6) bordersTouched++;
-    if (minY <= 5) bordersTouched++;
-    if (maxY >= procH - 6) bordersTouched++;
-    if (!roiNorm && bordersTouched >= 2) continue;
+    if (minX <= 6) bordersTouched++;
+    if (maxX >= procW - 7) bordersTouched++;
+    if (minY <= 6) bordersTouched++;
+    if (maxY >= procH - 7) bordersTouched++;
+    if (!roiNorm && bordersTouched >= 1) continue;
 
     // 5. Minimum-Area Oriented Bounding Box (OBB) Corner Reconstruction (occlusion-immune)
     const centroidX = sumX / areaCount;
@@ -498,10 +498,10 @@ export function detectQuadFromSource(
     const v1 = vVals[pHigh];
 
     const obbBoxArea = Math.max(1, (u1 - u0) * (v1 - v0));
-    if (obbBoxArea > total * 0.72) continue;
+    if (obbBoxArea > total * 0.56) continue;
 
     const obbFillRatio = areaCount / obbBoxArea;
-    if (obbFillRatio < 0.48) continue;
+    if (obbFillRatio < 0.52) continue;
 
     // Interior texture homogeneity check: reject noisy shirts/walls/hair (high RGB std dev)
     let sumRReg = 0, sumGReg = 0, sumBReg = 0;
@@ -612,18 +612,36 @@ export function detectQuadFromSource(
     }
     if (interiorSkinHits / (interiorGrid * interiorGrid) > 0.08) continue;
 
-    // Per-Side & Perimeter Edge-Support Verification along all 4 reconstructed edges
-    const edgeThreshold = meanMag * 1.15;
+    // Per-Side Physical Sobel Edge Floor & Inward-vs-Outward Color Step Verification
+    // Absolute floor (>= 54) prevents camera sensor grain on a flat painted wall from ever counting as an object edge
+    const edgeThreshold = Math.max(54, meanMag * 1.85);
     let supportedSamples = 0;
     const samplesPerSide = 16;
     const sideSupport = [0, 0, 0, 0];
+    let contrastSupportedSides = 0;
+
+    // Quad center for outward normal orientation check
+    const quadCx = (rawQuad[0].x + rawQuad[1].x + rawQuad[2].x + rawQuad[3].x) * 0.25;
+    const quadCy = (rawQuad[0].y + rawQuad[1].y + rawQuad[2].y + rawQuad[3].y) * 0.25;
+
     for (let side = 0; side < 4; side++) {
       const a = rawQuad[side];
       const b = rawQuad[(side + 1) % 4];
       const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-      const nx = -(b.y - a.y) / len;
-      const ny = (b.x - a.x) / len;
+      let nx = -(b.y - a.y) / len;
+      let ny = (b.x - a.x) / len;
+      // Ensure (nx, ny) points OUTWARD away from quad center
+      const midX = (a.x + b.x) * 0.5;
+      const midY = (a.y + b.y) * 0.5;
+      if ((midX - quadCx) * nx + (midY - quadCy) * ny < 0) {
+        nx = -nx;
+        ny = -ny;
+      }
+
       let sideHits = 0;
+      let sideStepDiffSum = 0;
+      let sideStepCount = 0;
+
       for (let s = 0; s < samplesPerSide; s++) {
         const t = 0.08 + (s / (samplesPerSide - 1)) * 0.84;
         const px = a.x + (b.x - a.x) * t;
@@ -637,24 +655,49 @@ export function detectQuadFromSource(
           supportedSamples++;
           sideHits++;
         }
+
+        // Compare pixel 3px inside the quad vs 4px outside the quad
+        const inX = Math.max(1, Math.min(procW - 2, Math.round(px - nx * 3)));
+        const inY = Math.max(1, Math.min(procH - 2, Math.round(py - ny * 3)));
+        const outX = Math.max(1, Math.min(procW - 2, Math.round(px + nx * 4)));
+        const outY = Math.max(1, Math.min(procH - 2, Math.round(py + ny * 4)));
+        const inIdx = inY * procW + inX;
+        const outIdx = outY * procW + outX;
+        const stepColorDiff =
+          Math.abs(blurR[inIdx] - blurR[outIdx]) +
+          Math.abs(blurG[inIdx] - blurG[outIdx]) +
+          Math.abs(blurB[inIdx] - blurB[outIdx]);
+        sideStepDiffSum += stepColorDiff;
+        sideStepCount++;
       }
+
       sideSupport[side] = sideHits / samplesPerSide;
+      if (sideStepDiffSum / Math.max(1, sideStepCount) >= 22) {
+        contrastSupportedSides++;
+      }
     }
+
     const edgeSupportRatio = supportedSamples / (4 * samplesPerSide);
     const sortedSides = [...sideSupport].sort((a, b) => a - b);
-    // Allow 1 side to be partially occluded by the holding hand while requiring 3 strong sides
-    const minWeakSide = roiNorm ? 0.14 : 0.18;
-    const minStrongSides = roiNorm ? 0.25 : 0.34;
-    const meanEdgeReq = roiNorm ? 0.34 : 0.44;
+    // Require 3 strong physical edges + genuine inside-vs-outside color contrast across >= 3 sides
+    const minWeakSide = roiNorm ? 0.16 : 0.20;
+    const minStrongSides = roiNorm ? 0.32 : 0.42;
+    const meanEdgeReq = roiNorm ? 0.38 : 0.48;
     if (
       sortedSides[0] < minWeakSide ||
       sortedSides[1] < minStrongSides ||
-      edgeSupportRatio < meanEdgeReq
+      edgeSupportRatio < meanEdgeReq ||
+      (!roiNorm && contrastSupportedSides < 3)
     ) {
       continue;
     }
 
-    const bgDiff = Math.abs(sr - bgR) + Math.abs(sg - bgG) + Math.abs(sb - bgB);
+    const bgDiff =
+      Math.abs(meanRReg - bgR) + Math.abs(meanGReg - bgG) + Math.abs(meanBReg - bgB);
+    // Reject patches whose interior color blends into the surrounding background wall without ultra-sharp edges
+    if (!roiNorm && bgDiff < 28 && edgeSupportRatio < 0.72) {
+      continue;
+    }
     const distToCenter = Math.hypot(centroidX - cxFrame, centroidY - cyFrame);
     const centrality = Math.max(0.15, 1.0 - 0.85 * (distToCenter / Math.max(1, maxDist)));
     let score =
@@ -1001,6 +1044,7 @@ export function useBoundaryDetection(): BoundaryDetectionState {
       setIsCalibrating(true);
 
       let frameTick = 0;
+      let missedTicks = 0;
       const loop = () => {
         frameTick++;
         const trackingActive =
@@ -1029,7 +1073,15 @@ export function useBoundaryDetection(): BoundaryDetectionState {
             trackStateRef.current = res.track;
             setEdgeConfidence((prev) => (prev === res.confidence ? prev : res.confidence));
             if (res.corners) {
+              missedTicks = 0;
               targetCornersRef.current = res.corners;
+            } else {
+              missedTicks++;
+              // If no valid physical object is in front of the camera, return reticle to neutral standby frame
+              if (missedTicks >= 4) {
+                trackStateRef.current = null;
+                targetCornersRef.current = DEFAULT_CORNERS;
+              }
             }
           }
         }

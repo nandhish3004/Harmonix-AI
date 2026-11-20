@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { VoiceToggle } from "@/components/ui/VoiceToggle";
+import { HarmonixLogo, triggerHarmonixSplash } from "@/components/ui/HarmonixLogo";
 
 interface HudHeaderProps {
   title: string;
@@ -84,6 +85,15 @@ export const HudHeader: React.FC<HudHeaderProps> = ({
               <ArrowLeft className="w-4 h-4" />
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={triggerHarmonixSplash}
+            title="Replay Harmonix Intro Animation"
+            className="shrink-0 rounded-xl hover:scale-105 active:scale-95 transition-transform"
+          >
+            <HarmonixLogo size="sm" />
+          </button>
 
           <div className="min-w-0">
             {stepNum && (

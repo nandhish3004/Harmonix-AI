@@ -130,8 +130,8 @@ export async function detectBoardHF(
   }
 
   const [obj, cls] = await Promise.all([
-    detectObjectInBrowser(fullImage, 1800),
-    classifyBoardInBrowser(croppedImage ?? fullImage, 1100),
+    detectObjectInBrowser(fullImage, 900),
+    croppedImage ? classifyBoardInBrowser(croppedImage, 700) : Promise.resolve(null),
   ]);
 
   if (obj && cls) {

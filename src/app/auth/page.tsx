@@ -7,6 +7,7 @@ import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { HarmonixLogo, triggerHarmonixSplash } from "@/components/ui/HarmonixLogo";
 import { createClient } from "@/utils/supabase/client";
 
 export default function AuthPage() {
@@ -114,10 +115,22 @@ export default function AuthPage() {
       {/* Top HUD Branding */}
       <div className="space-y-6">
         <div className="flex items-center justify-between text-xs font-mono text-slate-500 dark:text-[#8C999A]">
-          <div className="flex items-center gap-2">
-            <Lock className="w-4 h-4 text-sky-600 dark:text-[#0EB29A]" />
-            <span className="tracking-widest text-slate-800 dark:text-[#0EB29A] font-semibold">SECURITY GATEWAY</span>
-          </div>
+          <button
+            type="button"
+            onClick={triggerHarmonixSplash}
+            title="Replay Harmonix Intro Animation"
+            className="flex items-center gap-2.5 text-left"
+          >
+            <HarmonixLogo size="md" />
+            <div>
+              <span className="block tracking-widest text-slate-900 dark:text-[#F5FDFF] font-extrabold">
+                SECURITY GATEWAY
+              </span>
+              <span className="block text-[9px] tracking-wider text-sky-600 dark:text-[#0EB29A]">
+                HARMONIX-AR STUDIO
+              </span>
+            </div>
+          </button>
           <div className="flex items-center gap-2">
             <ThemeToggle />
             <HudBadge variant="teal" dot>
