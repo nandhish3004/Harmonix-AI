@@ -18,7 +18,7 @@ import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
 import { TestGuide } from "@/components/guide/TestGuide";
-import { useAutoAdvance } from "@/context/autopilot";
+import { useAutoAdvance, useAutopilot } from "@/context/autopilot";
 import { classifyTapHF } from "@/utils/aiClient";
 import {
   analyzeTapSignal,
@@ -55,7 +55,8 @@ type Phase = "idle" | "listening" | "analyzing" | "done" | "failed";
 export default function FindItsNotePage() {
   const router = useRouter();
 
-  const [guideOpen, setGuideOpen] = useState<boolean>(true);
+  const [guideOpen, setGuideOpen] = useState<boolean>(false);
+  const { enabled: autopilotEnabled } = useAutopilot();
   const [phase, setPhase] = useState<Phase>("idle");
   const [level, setLevel] = useState<number>(0);
   const [tapCount, setTapCount] = useState<number>(0);
@@ -655,9 +656,24 @@ export default function FindItsNotePage() {
     return () => clearTimeout(t);
   }, [guideOpen, runTapListen]);
 
+  // Autopilot safety net: if mic is blocked or user doesn't tap within 4.2s, auto-run Active Sonar Ping so the AI pipeline never stalls
+  useEffect(() => {
+    if (!autopilotEnabled || guideOpen || phase === "done") return;
+    if (phase === "failed") {
+      void runActiveSonarPing();
+      return;
+    }
+    if (phase === "listening") {
+      const t = setTimeout(() => {
+        void runActiveSonarPing();
+      }, 4200);
+      return () => clearTimeout(t);
+    }
+  }, [autopilotEnabled, guideOpen, phase, runActiveSonarPing]);
+
   useAutoAdvance(
-    phase === "done" && freqSource === "measured" && !guideOpen,
-    2600,
+    phase === "done" && !guideOpen,
+    2400,
     () => router.push("/modes")
   );
 

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Globe, Check, Cpu, ArrowRight, Shield } from "lucide-react";
+import { Globe, Check, Cpu, ArrowRight, Shield, Sparkles } from "lucide-react";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
@@ -186,6 +186,21 @@ export default function LanguageSelectionPage() {
           <span>CONFIRM SYSTEM LOCALE</span>
           <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
         </HudButton>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (typeof window !== "undefined") {
+              localStorage.setItem("harmonix_lang", selectedLang);
+              window.sessionStorage.setItem("harmonix_autopilot", "1");
+            }
+            router.push("/scan");
+          }}
+          className="w-full py-3 px-4 rounded-xl border border-sky-200 dark:border-[#0EB29A]/40 bg-sky-50/80 dark:bg-[#1C332E]/60 text-sky-800 dark:text-[#4ADE80] text-xs font-bold flex items-center justify-center gap-2 hover:bg-sky-100 dark:hover:bg-[#1C332E] transition-colors"
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>1-Tap AI Auto-Inspect (Skip Login &amp; Setup)</span>
+        </button>
       </div>
     </div>
   );

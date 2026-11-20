@@ -37,7 +37,7 @@ export default function SetupCalibrationPage() {
   const [isTonePlaying, setIsTonePlaying] = useState<boolean>(false);
   const [isCalibrating, setIsCalibrating] = useState<boolean>(true);
   const [aiHealth, setAiHealth] = useState<AiHealth>({ status: "offline", hfConfigured: false });
-  const [guideOpen, setGuideOpen] = useState<boolean>(true);
+  const [guideOpen, setGuideOpen] = useState<boolean>(false);
   const { enabled: autopilotOn, start: startAutopilot } = useAutopilot();
 
   // Autopilot: once sensors are checked, go to the scanner automatically
@@ -226,6 +226,46 @@ export default function SetupCalibrationPage() {
       />
 
       <div className="p-4 space-y-4 flex-1">
+        {/* 1-Tap Full AI Autopilot Hero Card at the very top for non-technical users */}
+        <div className="rounded-3xl p-4 bg-slate-900 dark:bg-[#15282C] text-white border border-slate-700 dark:border-[#294044] space-y-2.5 shadow-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 font-extrabold">
+              <Bot className="w-5 h-5 text-[#7CC200] dark:text-[#0EB29A]" />
+              <span>1-Tap AI Auto-Inspect</span>
+            </div>
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#76B900] text-white">
+              EASIEST
+            </span>
+          </div>
+          <p className="text-xs text-slate-300 dark:text-[#8C999A] leading-snug">
+            New to this? Tap once and AI handles everything automatically: scans your board, picks the material,
+            measures its note, protects fragile parts, and generates your final Pass/Fail report.
+          </p>
+          <div className="flex items-center gap-2">
+            <HudButton
+              variant="secondary"
+              size="lg"
+              fullWidth
+              onClick={() => {
+                startAutopilot();
+                void speak("Autopilot on. I will handle every step for you.");
+                router.push("/scan");
+              }}
+              className="flex items-center justify-center gap-2"
+            >
+              <span>{autopilotOn ? "AI Autopilot ON — Start Scan" : "Start Full AI Inspection"}</span>
+              <ArrowRight className="w-4 h-4" />
+            </HudButton>
+            <button
+              type="button"
+              onClick={() => setGuideOpen(true)}
+              className="shrink-0 px-3 py-3 rounded-2xl bg-white/10 hover:bg-white/20 text-xs font-bold"
+            >
+              Guide
+            </button>
+          </div>
+        </div>
+
         {/* Hardware Status Banner */}
         <ChamferedCard className="p-4">
           <div className="flex items-center justify-between mb-3">

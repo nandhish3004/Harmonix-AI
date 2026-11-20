@@ -60,7 +60,7 @@ export default function WorkpieceScanPage() {
   const [showEdgeOverlay, setShowEdgeOverlay] = useState<boolean>(true);
   const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [isAiRunning, setIsAiRunning] = useState<boolean>(false);
-  const [guideOpen, setGuideOpen] = useState<boolean>(true);
+  const [guideOpen, setGuideOpen] = useState<boolean>(false);
   const [aiEngine, setAiEngine] = useState<string>("On-device CV");
   const autoDetectedRef = useRef<boolean>(false);
   const previewImgRef = useRef<HTMLImageElement | null>(null);

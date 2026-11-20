@@ -14,7 +14,7 @@ import { getStoredActiveMode, getStoredPlateGeometry } from "@/utils/physics";
 export default function DefectAnalysisPage() {
   const router = useRouter();
 
-  const [guideOpen, setGuideOpen] = useState<boolean>(true);
+  const [guideOpen, setGuideOpen] = useState<boolean>(false);
   const [baselineHz, setBaselineHz] = useState<number>(740);
   const [actualHz, setActualHz] = useState<number>(740);
   const [isMeasuredSource, setIsMeasuredSource] = useState<boolean>(false);

@@ -95,7 +95,7 @@ export default function ChladniViewportPage() {
   const [isAudioOn, setIsAudioOn] = useState<boolean>(false);
   const [isMicDriveOn, setIsMicDriveOn] = useState<boolean>(false);
   const [isSolving, setIsSolving] = useState<boolean>(false);
-  const [guideOpen, setGuideOpen] = useState<boolean>(true);
+  const [guideOpen, setGuideOpen] = useState<boolean>(false);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
   const [showFineTune, setShowFineTune] = useState<boolean>(false);
   const [material, setMaterial] = useState<MaterialData>(DEFAULT_MATERIAL);
@@ -255,7 +255,7 @@ export default function ChladniViewportPage() {
     setTimeout(() => setIsSolving(false), 750);
   }, [isSolving, loaded, material, thicknessMm, plateGeo, activeMode.m, activeMode.n, scatterSandGrains]);
 
-  useAutoAdvance(false, 2800, () => router.push("/tuner"));
+  useAutoAdvance(loaded && !guideOpen, 3200, () => router.push("/tuner"));
 
   // Toggle Live Microphone-Coupled AR Vibration
   const toggleMicDrive = async () => {

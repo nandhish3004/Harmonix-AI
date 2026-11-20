@@ -9,7 +9,7 @@ import React, {
   useState,
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Bot, Square } from "lucide-react";
+import { Bot, Play, Square } from "lucide-react";
 import { speak, cancelSpeech } from "@/utils/voice";
 
 export const AUTOPILOT_ROUTES = [
@@ -73,12 +73,13 @@ export const AutopilotProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, []);
 
   const stepIdx = AUTOPILOT_ROUTES.indexOf(pathname);
-  const showBar = enabled && stepIdx >= 0;
+  const showActiveBar = enabled && stepIdx >= 0;
+  const showQuickStartPill = !enabled && stepIdx >= 0 && stepIdx < AUTOPILOT_ROUTES.length - 1;
 
   return (
     <AutopilotContext.Provider value={{ enabled, start, stop }}>
       {children}
-      {showBar && (
+      {showActiveBar && (
         <div className="fixed left-0 right-0 bottom-[70px] z-40 pointer-events-none">
           <div className="max-w-[440px] mx-auto px-3">
             <div className="pointer-events-auto flex items-center gap-2.5 rounded-2xl bg-slate-900 dark:bg-[#15282C] text-white shadow-xl px-3.5 py-2.5 border border-slate-700 dark:border-[#294044]">
@@ -99,9 +100,26 @@ export const AutopilotProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                 }}
                 className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25"
               >
-                <Square className="w-3 h-3" /> Stop
+                <Square className="w-3 h-3" /> Pause
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {showQuickStartPill && (
+        <div className="fixed left-0 right-0 bottom-[70px] z-40 pointer-events-none">
+          <div className="max-w-[440px] mx-auto px-3 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                start();
+                narrate("AI autopilot enabled. Completing the inspection for you.");
+              }}
+              className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-slate-900/95 dark:bg-[#0EB29A] text-white dark:text-[#0D191C] shadow-lg px-3.5 py-2 text-xs font-bold border border-slate-700/80 dark:border-[#0EB29A] hover:scale-105 active:scale-95 transition-transform"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              <span>Let AI Finish All Steps</span>
+            </button>
           </div>
         </div>
       )}
