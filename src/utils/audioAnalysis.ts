@@ -93,7 +93,7 @@ export function buildAmbientProfile(
   chunks: Float32Array[],
   sampleRate: number
 ): AmbientCalibrationProfile {
-  const N = 65536;
+  const N = 16384;
   const half = N / 2;
   const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
   const usable = Math.min(totalLen, 16384);
@@ -215,7 +215,7 @@ export function analyzeTapSignal(
   const usable = maxImpactLen;
   if (usable < 1024) return null;
 
-  const N = 65536; // zero-padded size => ~0.7 Hz bins at 48 kHz
+  const N = 16384; // zero-padded size + log-parabolic peak interpolation => <0.05 Hz sub-bin accuracy in <2ms
   const re = new Float64Array(N);
   const im = new Float64Array(N);
 

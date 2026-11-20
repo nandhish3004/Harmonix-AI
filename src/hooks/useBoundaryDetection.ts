@@ -329,7 +329,6 @@ export function detectQuadFromSource(
   let bestScore = -1;
   let bestCorners: Point2D[] | null = null;
   let bestProcCorners: { x: number; y: number }[] | null = null;
-  let bestRegionPixels: number[] = [];
   let bestFillRatio = 0;
   let bestEdgeSupport = 0;
   let bestTrack: TrackState | null = null;
@@ -669,7 +668,6 @@ export function detectQuadFromSource(
 
     if (score > bestScore) {
       bestScore = score;
-      bestRegionPixels = regionPixels;
       bestFillRatio = Math.min(1, obbFillRatio);
       bestEdgeSupport = edgeSupportRatio;
       bestProcCorners = rawQuad;
@@ -691,39 +689,28 @@ export function detectQuadFromSource(
     }
   }
 
-  // 6. Render overlay highlighting segmented interior + crisp reconstructed OBB quad perimeter
+  // 6. Render lightweight vector overlay highlighting segmented OBB quad perimeter (zero ImageData allocation)
   if (overlayCanvas) {
-    overlayCanvas.width = procW;
-    overlayCanvas.height = procH;
+    if (overlayCanvas.width !== procW) overlayCanvas.width = procW;
+    if (overlayCanvas.height !== procH) overlayCanvas.height = procH;
     const overlayCtx = overlayCanvas.getContext("2d");
     if (overlayCtx) {
-      if (!bestCorners) {
-        overlayCtx.clearRect(0, 0, procW, procH);
-      } else {
-        const overlayData = overlayCtx.createImageData(procW, procH);
-        for (const idx of bestRegionPixels) {
-          const oIdx = idx * 4;
-          overlayData.data[oIdx] = 14;
-          overlayData.data[oIdx + 1] = 178;
-          overlayData.data[oIdx + 2] = 154;
-          overlayData.data[oIdx + 3] = 55;
+      overlayCtx.clearRect(0, 0, procW, procH);
+      if (bestProcCorners && bestProcCorners.length === 4) {
+        overlayCtx.save();
+        overlayCtx.fillStyle = "rgba(14, 178, 154, 0.18)";
+        overlayCtx.strokeStyle = "rgba(52, 211, 153, 0.96)";
+        overlayCtx.lineWidth = 2;
+        overlayCtx.lineJoin = "round";
+        overlayCtx.beginPath();
+        overlayCtx.moveTo(bestProcCorners[0].x, bestProcCorners[0].y);
+        for (let c = 1; c < 4; c++) {
+          overlayCtx.lineTo(bestProcCorners[c].x, bestProcCorners[c].y);
         }
-        overlayCtx.putImageData(overlayData, 0, 0);
-
-        if (bestProcCorners && bestProcCorners.length === 4) {
-          overlayCtx.save();
-          overlayCtx.strokeStyle = "rgba(52, 211, 153, 0.96)";
-          overlayCtx.lineWidth = 2;
-          overlayCtx.lineJoin = "round";
-          overlayCtx.beginPath();
-          overlayCtx.moveTo(bestProcCorners[0].x, bestProcCorners[0].y);
-          for (let c = 1; c < 4; c++) {
-            overlayCtx.lineTo(bestProcCorners[c].x, bestProcCorners[c].y);
-          }
-          overlayCtx.closePath();
-          overlayCtx.stroke();
-          overlayCtx.restore();
-        }
+        overlayCtx.closePath();
+        overlayCtx.fill();
+        overlayCtx.stroke();
+        overlayCtx.restore();
       }
     }
   }
@@ -1023,8 +1010,8 @@ export function useBoundaryDetection(): BoundaryDetectionState {
           videoRef.current.readyState >= 2 &&
           !uploadedImgRef.current;
 
-        // Run fast region-growing OBB detector at 20 Hz (every 3rd frame)
-        if (frameTick % 3 === 0 && trackingActive && videoRef.current) {
+        // Run fast region-growing OBB detector at 15 Hz (every 4th frame)
+        if (frameTick % 4 === 0 && trackingActive && videoRef.current) {
           const workCanvas = getWorkCanvas();
           const container = containerRef.current;
           if (workCanvas && container) {
@@ -1040,7 +1027,7 @@ export function useBoundaryDetection(): BoundaryDetectionState {
               trackStateRef.current
             );
             trackStateRef.current = res.track;
-            setEdgeConfidence(res.confidence);
+            setEdgeConfidence((prev) => (prev === res.confidence ? prev : res.confidence));
             if (res.corners) {
               targetCornersRef.current = res.corners;
             }

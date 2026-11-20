@@ -122,9 +122,9 @@ export default function ChladniViewportPage() {
     activeMode.n
   );
 
-  /** Initialize or scatter 1,800 physical Chladni sand grains uniformly across the board [0..1]^2. */
+  /** Initialize or scatter 1,100 physical Chladni sand grains uniformly across the board [0..1]^2. */
   const scatterSandGrains = useCallback(() => {
-    const count = 1800;
+    const count = 1100;
     const grains: SandGrain[] = new Array(count);
     for (let i = 0; i < count; i++) {
       grains[i] = {
@@ -340,7 +340,7 @@ export default function ChladniViewportPage() {
 
   // Push physics state into shader + persist for downstream screens
   useEffect(() => {
-    updateParameters(frequency, activeMode.m, activeMode.n, true);
+    updateParameters(frequency, activeMode.m, activeMode.n, true, viewMode === "2d");
     if (typeof window !== "undefined") {
       localStorage.setItem("harmonix_peak_freq", String(frequency));
       localStorage.setItem(
@@ -358,7 +358,7 @@ export default function ChladniViewportPage() {
     if (oscRef.current && audioCtxRef.current) {
       oscRef.current.frequency.setValueAtTime(frequency, audioCtxRef.current.currentTime);
     }
-  }, [frequency, activeMode.m, activeMode.n, activeMode.label, updateParameters]);
+  }, [frequency, activeMode.m, activeMode.n, activeMode.label, viewMode, updateParameters]);
 
   useEffect(() => {
     return () => {
@@ -369,7 +369,7 @@ export default function ChladniViewportPage() {
     };
   }, []);
 
-  // Spatial AR Laser Vibrometer + 1,800-Particle Chladni Sand Physics + 3D Surface
+  // Spatial AR Laser Vibrometer + Chladni Sand Physics (LUT-accelerated) + 3D Surface
   useEffect(() => {
     if (viewMode === "2d" || !spatialCanvasRef.current) return;
     const canvas = spatialCanvasRef.current;
@@ -382,10 +382,51 @@ export default function ChladniViewportPage() {
     let phase = 0;
     let frameTick = 0;
     let prevTrackState = null as ReturnType<typeof detectQuadFromSource>["track"];
-    const cols = viewMode === "ar" ? 22 : 26;
+    const cols = viewMode === "ar" ? 18 : 20;
     const rows = cols;
-    const evalAmp = (nx: number, ny: number) =>
-      chladniAmplitude(nx, ny, activeMode.m, activeMode.n);
+
+    // Precompute 64x64 LUT of W(u,v), |W(u,v)|, and finite-difference gradients so per-frame particle updates do zero trig calls
+    const LUT_N = 64;
+    const wSignedLut = new Float32Array(LUT_N * LUT_N);
+    const wAbsLut = new Float32Array(LUT_N * LUT_N);
+    const gradULut = new Float32Array(LUT_N * LUT_N);
+    const gradVLut = new Float32Array(LUT_N * LUT_N);
+
+    for (let y = 0; y < LUT_N; y++) {
+      const ny = y / (LUT_N - 1);
+      for (let x = 0; x < LUT_N; x++) {
+        const nx = x / (LUT_N - 1);
+        const w = chladniAmplitude(nx, ny, activeMode.m, activeMode.n);
+        const idx = y * LUT_N + x;
+        wSignedLut[idx] = w;
+        wAbsLut[idx] = Math.abs(w);
+      }
+    }
+    const stepUV = 1 / (LUT_N - 1);
+    for (let y = 0; y < LUT_N; y++) {
+      const yn = Math.min(LUT_N - 1, y + 1);
+      for (let x = 0; x < LUT_N; x++) {
+        const xn = Math.min(LUT_N - 1, x + 1);
+        const idx = y * LUT_N + x;
+        const w0 = wAbsLut[idx];
+        gradULut[idx] = (wAbsLut[y * LUT_N + xn] - w0) / stepUV;
+        gradVLut[idx] = (wAbsLut[yn * LUT_N + x] - w0) / stepUV;
+      }
+    }
+
+    // Precompute grid node amplitudes once per mode change
+    const gridW = new Float32Array((rows + 1) * (cols + 1));
+    const gridAbsW = new Float32Array((rows + 1) * (cols + 1));
+    for (let r = 0; r <= rows; r++) {
+      const ny = r / rows;
+      for (let c = 0; c <= cols; c++) {
+        const nx = c / cols;
+        const w = chladniAmplitude(nx, ny, activeMode.m, activeMode.n);
+        const gi = r * (cols + 1) + c;
+        gridW[gi] = w;
+        gridAbsW[gi] = Math.abs(w);
+      }
+    }
 
     // Anchor immediately to the user's scanned board polygon from Screen 2
     let trackedQuad: Point2D[] = quad.map((p) => ({ ...p }));
@@ -397,12 +438,12 @@ export default function ChladniViewportPage() {
 
     // Physical peak deflection in micrometers (µm) for HUD telemetry
     const omega = 2 * Math.PI * Math.max(100, frequency);
-    const maxDeflectionUm = Math.round(((activeMode.resonanceGain * 3.5 * 9.81) / (omega * omega)) * 1e6 * 10) / 10;
+    const maxDeflectionUm =
+      Math.round(((activeMode.resonanceGain * 3.5 * 9.81) / (omega * omega)) * 1e6 * 10) / 10;
 
     type P = { sx: number; sy: number; amp: number; w: number; depth: number };
 
     const draw = () => {
-      // Sample live microphone energy if Mic Drive is active
       if (micAnalyserRef.current) {
         micAnalyserRef.current.getFloatTimeDomainData(micBuf);
         let sum = 0;
@@ -417,10 +458,10 @@ export default function ChladniViewportPage() {
       phase += 0.14 * Math.min(1.6, micGainRef.current);
       frameTick++;
 
-      // Smoothly refine AR quad when camera detects strong board edges (unless user locked the anchor)
+      // Low-overhead 4 Hz camera refinement (every 15th frame) when unlocked
       if (
         !arAnchorLocked &&
-        (frameTick === 1 || frameTick % 4 === 0) &&
+        frameTick % 15 === 0 &&
         viewMode === "ar" &&
         cameraActive &&
         videoRef.current &&
@@ -438,11 +479,10 @@ export default function ChladniViewportPage() {
           prevTrackState
         );
         prevTrackState = res.track;
-        if (res.corners && res.corners.length === 4 && res.confidence >= 55) {
-          setArTargetVisible(true);
+        if (res.corners && res.corners.length === 4 && res.confidence >= 58) {
           trackedQuad = trackedQuad.map((p, idx) => {
             const delta = Math.hypot(res.corners![idx].x - p.x, res.corners![idx].y - p.y);
-            const alpha = delta < 2 ? 0 : delta < 8 ? 0.15 : 0.28;
+            const alpha = delta < 2.5 ? 0 : delta < 9 ? 0.14 : 0.25;
             return {
               x: p.x * (1 - alpha) + res.corners![idx].x * alpha,
               y: p.y * (1 - alpha) + res.corners![idx].y * alpha,
@@ -480,36 +520,39 @@ export default function ChladniViewportPage() {
       const sinY = Math.sin(yaw);
       const cosP = Math.cos(pitch);
       const sinP = Math.sin(pitch);
-      const pts: P[][] = [];
+      const pts: P[][] = new Array(rows + 1);
+      const zScale = gainScale * (viewMode === "ar" ? 10 : 24) * osc;
 
       for (let r = 0; r <= rows; r++) {
-        const rowArr: P[] = [];
+        const rowArr: P[] = new Array(cols + 1);
         const ny = r / rows;
+        const rowOff = r * (cols + 1);
         for (let c = 0; c <= cols; c++) {
           const nx = c / cols;
-          const w = evalAmp(nx, ny);
-          const z = w * osc * gainScale * (viewMode === "ar" ? 10 : 24);
+          const gi = rowOff + c;
+          const w = gridW[gi];
+          const amp = gridAbsW[gi];
+          const z = w * zScale;
           if (viewMode === "ar") {
             const p = applyHomography(H, nx, ny);
-            rowArr.push({ sx: p.x, sy: p.y - z, amp: Math.abs(w), w, depth: 0 });
+            rowArr[c] = { sx: p.x, sy: p.y - z, amp, w, depth: 0 };
           } else {
             const cx = (nx - 0.5) * normW;
             const cy = (ny - 0.5) * normH;
             const rx = cx * cosY - cy * sinY;
             const ry = cx * sinY + cy * cosY;
-            rowArr.push({
+            rowArr[c] = {
               sx: 180 + rx * 230,
               sy: 196 + ry * cosP * 205 - z * sinP,
-              amp: Math.abs(w),
+              amp,
               w,
               depth: ry * sinP,
-            });
+            };
           }
         }
-        pts.push(rowArr);
+        pts[r] = rowArr;
       }
 
-      // Collect quads
       const quads: { a: P; b: P; c: P; d: P; depth: number; amp: number }[] = [];
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
@@ -529,10 +572,13 @@ export default function ChladniViewportPage() {
       }
       if (viewMode === "3d") quads.sort((p, q) => p.depth - q.depth);
 
-      // Draw Laser Vibrometer surface field + Nodal zero-crossing contour lines
-      for (const q of quads) {
-        const hue = heatHue(q.amp);
-        const light = viewMode === "3d" ? 42 + q.amp * 14 : 52;
+      // Batch nodal zero-crossing segments into a single stroke call
+      const nodalSegments: number[] = [];
+
+      for (let qi = 0; qi < quads.length; qi++) {
+        const q = quads[qi];
+        const hue = heatHue(q.amp) | 0;
+        const light = viewMode === "3d" ? (42 + q.amp * 14) | 0 : 52;
         const fillAlpha =
           viewMode === "ar"
             ? arStyle === "sand"
@@ -554,73 +600,96 @@ export default function ChladniViewportPage() {
 
         if (viewMode === "3d" || arStyle === "mesh") {
           ctx.strokeStyle =
-            viewMode === "ar"
-              ? `hsla(${hue}, 100%, 70%, 0.65)`
-              : "rgba(255,255,255,0.22)";
+            viewMode === "ar" ? `hsla(${hue}, 100%, 70%, 0.65)` : "rgba(255,255,255,0.22)";
           ctx.lineWidth = viewMode === "ar" ? 0.8 : 0.6;
           ctx.stroke();
         }
 
-        // Draw crisp Kirchhoff-Love Nodal Zero-Crossing Contours (W(x,y) = 0) in BOTH AR and 3D
-        const edges: [P, P][] = [
-          [q.a, q.b],
-          [q.b, q.c],
-          [q.c, q.d],
-          [q.d, q.a],
-        ];
-        const hits: { x: number; y: number }[] = [];
-        for (const [p0, p1] of edges) {
+        // Collect nodal zero-crossing contour segments (W(x,y) = 0)
+        const e0 = q.a;
+        const e1 = q.b;
+        const e2 = q.c;
+        const e3 = q.d;
+        let hitCount = 0;
+        let hx0 = 0,
+          hy0 = 0,
+          hx1 = 0,
+          hy1 = 0;
+        const checkEdge = (p0: P, p1: P) => {
           if ((p0.w <= 0 && p1.w > 0) || (p0.w >= 0 && p1.w < 0)) {
             const t = Math.abs(p0.w) / (Math.abs(p0.w) + Math.abs(p1.w) + 1e-6);
-            hits.push({
-              x: p0.sx + (p1.sx - p0.sx) * t,
-              y: p0.sy + (p1.sy - p0.sy) * t,
-            });
+            const hx = p0.sx + (p1.sx - p0.sx) * t;
+            const hy = p0.sy + (p1.sy - p0.sy) * t;
+            if (hitCount === 0) {
+              hx0 = hx;
+              hy0 = hy;
+            } else if (hitCount === 1) {
+              hx1 = hx;
+              hy1 = hy;
+            }
+            hitCount++;
           }
-        }
-        if (hits.length >= 2) {
-          ctx.strokeStyle =
-            viewMode === "ar" ? "rgba(103, 232, 249, 0.75)" : "rgba(248, 250, 252, 0.88)";
-          ctx.lineWidth = viewMode === "ar" ? 1.5 : 1.4;
-          ctx.beginPath();
-          ctx.moveTo(hits[0].x, hits[0].y);
-          ctx.lineTo(hits[1].x, hits[1].y);
-          ctx.stroke();
+        };
+        checkEdge(e0, e1);
+        checkEdge(e1, e2);
+        checkEdge(e2, e3);
+        checkEdge(e3, e0);
+        if (hitCount >= 2) {
+          nodalSegments.push(hx0, hy0, hx1, hy1);
         }
       }
 
-      // Update & Render 1,800 Physical Chladni Sand Particles migrating to nodal lines (W(u,v) = 0)
+      if (nodalSegments.length > 0) {
+        ctx.strokeStyle =
+          viewMode === "ar" ? "rgba(103, 232, 249, 0.78)" : "rgba(248, 250, 252, 0.88)";
+        ctx.lineWidth = viewMode === "ar" ? 1.5 : 1.4;
+        ctx.beginPath();
+        for (let i = 0; i < nodalSegments.length; i += 4) {
+          ctx.moveTo(nodalSegments[i], nodalSegments[i + 1]);
+          ctx.lineTo(nodalSegments[i + 2], nodalSegments[i + 3]);
+        }
+        ctx.stroke();
+      }
+
+      // Update & Render Physical Chladni Sand Particles via O(1) LUT + 2 batched draw calls
       if (arStyle === "sand") {
         const grains = sandGrainsRef.current;
-        const eps = 0.008;
         const driveStrength = Math.min(2.0, 0.65 + micGainRef.current * 0.55);
+        const step = 0.018 * driveStrength;
+        const lutMax = LUT_N - 1;
+        const settledCoords: number[] = [];
+        const activeCoords: number[] = [];
 
         for (let i = 0; i < grains.length; i++) {
           const g = grains[i];
-          const w0 = Math.abs(evalAmp(g.u, g.v));
+          const lx = Math.max(0, Math.min(lutMax, (g.u * lutMax) | 0));
+          const ly = Math.max(0, Math.min(lutMax, (g.v * lutMax) | 0));
+          const lIdx = ly * LUT_N + lx;
+          const w0 = wAbsLut[lIdx];
 
           if (w0 > 0.03) {
-            // Finite-difference gradient of |W(u,v)| -> particles drift downhill toward nodal lines
-            const wu = Math.abs(evalAmp(Math.min(0.99, g.u + eps), g.v)) - w0;
-            const wv = Math.abs(evalAmp(g.u, Math.min(0.99, g.v + eps))) - w0;
-            const step = 0.018 * driveStrength;
-            g.u -= (wu / eps) * step * w0 + (Math.random() - 0.5) * 0.022 * w0 * driveStrength;
-            g.v -= (wv / eps) * step * w0 + (Math.random() - 0.5) * 0.022 * w0 * driveStrength;
-            g.u = Math.max(0.015, Math.min(0.985, g.u));
-            g.v = Math.max(0.015, Math.min(0.985, g.v));
+            g.u -=
+              gradULut[lIdx] * step * w0 +
+              (Math.random() - 0.5) * 0.022 * w0 * driveStrength;
+            g.v -=
+              gradVLut[lIdx] * step * w0 +
+              (Math.random() - 0.5) * 0.022 * w0 * driveStrength;
+            if (g.u < 0.015) g.u = 0.015;
+            else if (g.u > 0.985) g.u = 0.985;
+            if (g.v < 0.015) g.v = 0.015;
+            else if (g.v > 0.985) g.v = 0.985;
           }
 
           let sx = 0;
           let sy = 0;
-          const jitterZ = w0 > 0.08 ? Math.sin(phase * 1.8 + i) * w0 * 4.5 * driveStrength : 0;
+          const jitterZ = w0 > 0.08 ? Math.sin(phase * 1.8 + (i & 31)) * w0 * 4.2 * driveStrength : 0;
 
           if (viewMode === "ar") {
             const p = applyHomography(H, g.u, g.v);
             sx = p.x;
             sy = p.y - jitterZ;
           } else {
-            const wSigned = evalAmp(g.u, g.v);
-            const z = wSigned * osc * gainScale * 24;
+            const z = wSignedLut[lIdx] * zScale;
             const cx = (g.u - 0.5) * normW;
             const cy = (g.v - 0.5) * normH;
             const rx = cx * cosY - cy * sinY;
@@ -629,10 +698,28 @@ export default function ChladniViewportPage() {
             sy = 196 + ry * cosP * 205 - (z + jitterZ) * sinP;
           }
 
-          // Settled nodal sand grains glow crisp gold/cream; flying antinode grains are warm orange
-          ctx.fillStyle =
-            w0 < 0.09 ? "rgba(245, 240, 196, 0.94)" : "rgba(251, 191, 36, 0.62)";
-          ctx.fillRect(sx - 0.9, sy - 0.9, 1.9, 1.9);
+          if (w0 < 0.09) {
+            settledCoords.push(sx - 0.95, sy - 0.95);
+          } else {
+            activeCoords.push(sx - 0.85, sy - 0.85);
+          }
+        }
+
+        if (activeCoords.length > 0) {
+          ctx.fillStyle = "rgba(251, 191, 36, 0.62)";
+          ctx.beginPath();
+          for (let k = 0; k < activeCoords.length; k += 2) {
+            ctx.rect(activeCoords[k], activeCoords[k + 1], 1.7, 1.7);
+          }
+          ctx.fill();
+        }
+        if (settledCoords.length > 0) {
+          ctx.fillStyle = "rgba(245, 240, 196, 0.95)";
+          ctx.beginPath();
+          for (let k = 0; k < settledCoords.length; k += 2) {
+            ctx.rect(settledCoords[k], settledCoords[k + 1], 1.9, 1.9);
+          }
+          ctx.fill();
         }
       }
 

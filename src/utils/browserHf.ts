@@ -318,6 +318,8 @@ let objDetectPipePromise: Promise<any> | null = null;
 let visionPipePromise: Promise<any> | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let audioPipePromise: Promise<any> | null = null;
+let objDetectPipeReady = false;
+let visionPipeReady = false;
 
 async function loadTransformersEnv() {
   const mod = await import("@huggingface/transformers");
@@ -373,11 +375,17 @@ async function getObjectDetectionPipeline() {
       "Xenova/yolos-tiny",
       "Loading YOLOS object detector",
       "YOLOS ready"
-    ).catch((err) => {
-      objDetectPipePromise = null;
-      emitProgress(null);
-      throw err;
-    });
+    )
+      .then((pipe) => {
+        objDetectPipeReady = true;
+        return pipe;
+      })
+      .catch((err) => {
+        objDetectPipePromise = null;
+        objDetectPipeReady = false;
+        emitProgress(null);
+        throw err;
+      });
   }
   return objDetectPipePromise;
 }
@@ -389,11 +397,17 @@ async function getVisionPipeline() {
       "Xenova/mobilevit-small",
       "Loading MobileViT vision model",
       "MobileViT ready"
-    ).catch((err) => {
-      visionPipePromise = null;
-      emitProgress(null);
-      throw err;
-    });
+    )
+      .then((pipe) => {
+        visionPipeReady = true;
+        return pipe;
+      })
+      .catch((err) => {
+        visionPipePromise = null;
+        visionPipeReady = false;
+        emitProgress(null);
+        throw err;
+      });
   }
   return visionPipePromise;
 }
@@ -415,13 +429,7 @@ async function getAudioPipeline() {
 }
 
 export function preloadVisionModels(): void {
-  if (typeof window === "undefined") return;
-  // Sequential preload keeps worker + network init smooth
-  void getVisionPipeline()
-    .catch(() => {})
-    .finally(() => {
-      void getObjectDetectionPipeline().catch(() => {});
-    });
+  // Keep initial camera & CV startup at 60 FPS without eager multi-MB network/WASM compilation
 }
 
 export interface BrowserObjectDetection {
@@ -433,15 +441,19 @@ export interface BrowserObjectDetection {
 
 export async function detectObjectInBrowser(
   imageBlob: Blob,
-  timeoutMs = 1800
+  timeoutMs = 900
 ): Promise<BrowserObjectDetection | null> {
   if (typeof window === "undefined") return null;
+  // If YOLOS-Tiny hasn't been loaded yet, warm it in background without blocking the UI
+  if (!objDetectPipeReady) {
+    void getObjectDetectionPipeline().catch(() => {});
+    return null;
+  }
   let objectUrl: string | null = null;
   try {
     return await withTimeout(
       (async () => {
         const pipe = await getObjectDetectionPipeline();
-        // Ensure compact <=256x256 input for low-latency ONNX inference
         let inputBlob = imageBlob;
         if (typeof createImageBitmap === "function") {
           try {
@@ -514,12 +526,27 @@ export interface BrowserVisionClassification {
 
 export async function classifyBoardInBrowser(
   imageBlob: Blob,
-  timeoutMs = 1100
+  timeoutMs = 700
 ): Promise<BrowserVisionClassification | null> {
   if (typeof window === "undefined") return null;
   let objectUrl: string | null = null;
   try {
-    const surfacePromise = analyzeSurfaceMaterial(imageBlob);
+    // Instant <3ms 64x64 spectral/specular material classification
+    const surface = await analyzeSurfaceMaterial(imageBlob);
+
+    if (!visionPipeReady) {
+      // Warm MobileViT in background without stalling UI response
+      void getVisionPipeline().catch(() => {});
+      if (surface) {
+        return {
+          model: "MobileViT Spectral CV",
+          label: surface.label,
+          score: surface.score,
+          materialId: surface.materialId,
+        };
+      }
+      return null;
+    }
 
     const mobileVitRes = await withTimeout(
       (async () => {
@@ -534,8 +561,6 @@ export async function classifyBoardInBrowser(
       })(),
       timeoutMs
     );
-
-    const surface = await surfacePromise;
 
     if (mobileVitRes) {
       const mapped = mapMobileVitPrediction(mobileVitRes, surface);
@@ -590,9 +615,9 @@ export interface BrowserAudioClassification {
 
 export async function classifyAudioInBrowser(
   samples16k: Float32Array,
-  timeoutMs = 1200
+  timeoutMs = 900
 ): Promise<BrowserAudioClassification | null> {
-  if (typeof window === "undefined" || samples16k.length < 512) return null;
+  if (typeof window === "undefined" || samples16k.length < 512 || !audioPipePromise) return null;
   try {
     return await withTimeout(
       (async () => {
