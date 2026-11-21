@@ -1,273 +1,263 @@
 # -*- coding: utf-8 -*-
 """
-HARMONIX-AR — Software Engineering Capstone presentation builder.
-Theme tokens extracted from the app UI (README design-system table).
-Content format mirrors the reference capstone deck (ITA0509 CPFD).
+HARMONIX-AR — Software Engineering Capstone deck (v2).
+UI evidence : real headless-browser screenshots of the implemented app (ppt-work/shots).
+Theme       : the app's CURRENT light engineering palette (tailwind.config.ts / globals.css).
+Slide 1     : faithful replica of the reference capstone deck title slide (exact logo).
 """
 import os
-from PIL import Image
+from PIL import Image, ImageDraw
 from pptx import Presentation
-from pptx.util import Inches, Pt, Emu
+from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.enum.shapes import MSO_SHAPE, MSO_CONNECTOR
 from pptx.oxml.ns import qn
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-UI = os.path.join(ROOT, "ui")
+SHOTS = os.path.join(ROOT, "shots")
 REF = os.path.join(ROOT, "ref")
 LOGO = os.path.join(ROOT, "logo")
 IMG = os.path.join(ROOT, "..", "image-search")
 
-# ---------------- theme tokens (from app UI) ----------------
-BG        = "0D191C"
-DEEP      = "101F23"
-CARD      = "15282C"
-CARD_ACT  = "1C332E"
-ITEM      = "233A3D"
-STROKE    = "294044"
-STROKE_HI = "3E5556"
-TEAL      = "0EB29A"
-TEAL_DK   = "0A7F6D"
-LIME      = "DDF0C2"
-MUTED     = "8C999A"
-LIGHT     = "F5FDFF"
-DANGER    = "FF4444"
-SAFE      = "4ADE80"
-WARN      = "F5C518"
-VOLT      = "68A800"
+# ---- current app light-theme tokens (tailwind hud.light-*) ----
+BG       = "F8FAFC"
+CARD     = "FFFFFF"
+SURF     = "F1F5F9"
+BORDER   = "E2E8F0"
+BORDERHI = "CBD5E1"
+NAVY     = "0F172A"
+ACC      = "0284C7"   # sky-600
+ACC_DK   = "0369A1"   # sky-700
+ACC_BG   = "F0F9FF"   # sky-50
+MUTED    = "64748B"
+BODYTX   = "334155"
+SAFE     = "16A34A"
+SAFE_BG  = "F0FDF4"
+DANGER   = "DC2626"
+DANGER_BG= "FEF2F2"
+WARN     = "B45309"
+WARN_BG  = "FFFBEB"
+VOLT     = "68A800"
+REFBLUE  = "1F6FB2"   # reference deck title blue
 
-HEAD = "Calibri"          # crisp light headings
-BODY = "Calibri"
-MONO = "Consolas"         # HUD monospace readouts
+FONT = "Inter"        # app typeface (next/font Inter); graceful fallback elsewhere
+SERIF = "Times New Roman"
 
-EMU_IN = 914400
 SW, SH = 13.333, 7.5
+EMU_IN = 914400
 
 prs = Presentation()
 prs.slide_width = Inches(SW)
 prs.slide_height = Inches(SH)
 BLANK = prs.slide_layouts[6]
 
-def C(hexs): return RGBColor.from_string(hexs)
+def C(h): return RGBColor.from_string(h)
 
-def slide():
+# ---- AR grid backdrop (app's .ar-grid-bg, light variant) ----
+GRID_PNG = os.path.join(ROOT, "grid_light.png")
+if not os.path.exists(GRID_PNG):
+    im = Image.new("RGB", (1280, 720), "#F8FAFC")
+    d = ImageDraw.Draw(im)
+    for x in range(0, 1280, 24):
+        d.line([(x, 0), (x, 720)], fill=(226, 232, 240), width=1)
+    for y in range(0, 720, 24):
+        d.line([(0, y), (1280, y)], fill=(226, 232, 240), width=1)
+    im.save(GRID_PNG)
+
+def slide(grid=True):
     s = prs.slides.add_slide(BLANK)
     s.background.fill.solid()
     s.background.fill.fore_color.rgb = C(BG)
+    if grid:
+        s.shapes.add_picture(GRID_PNG, 0, 0, Inches(SW), Inches(SH))
     return s
-
-def _no_shadow(shp):
-    shp.shadow.inherit = False
 
 def set_spc(run, val):
     run._r.get_or_add_rPr().set('spc', str(val))
 
+def _no_shadow(shp): shp.shadow.inherit = False
+
 def rect(s, x, y, w, h, fill=None, line=None, lw=1.0, shape=MSO_SHAPE.RECTANGLE, dash=None):
     sp = s.shapes.add_shape(shape, Inches(x), Inches(y), Inches(w), Inches(h))
-    if fill is None:
-        sp.fill.background()
-    else:
-        sp.fill.solid(); sp.fill.fore_color.rgb = C(fill)
-    if line is None:
-        sp.line.fill.background()
+    if fill is None: sp.fill.background()
+    else: sp.fill.solid(); sp.fill.fore_color.rgb = C(fill)
+    if line is None: sp.line.fill.background()
     else:
         sp.line.color.rgb = C(line); sp.line.width = Pt(lw)
         if dash:
             ln = sp.line._get_or_add_ln()
             ln.append(ln.makeelement(qn('a:prstDash'), {'val': dash}))
-    _no_shadow(sp)
-    sp.text_frame.word_wrap = True
+    _no_shadow(sp); sp.text_frame.word_wrap = True
     return sp
 
-def chamfer(s, x, y, w, h, cut=0.14, fill=CARD, line=STROKE, lw=1.0, dash=None):
-    """Chamfered card — the app's signature ChamferedCard geometry."""
+def chamfer(s, x, y, w, h, cut=0.14, fill=CARD, line=BORDER, lw=1.0, dash=None):
     X, Y, W, H, K = [v * EMU_IN for v in (x, y, w, h, cut)]
     pts = [(X + K, Y), (X + W, Y), (X + W, Y + H - K), (X + W - K, Y + H), (X, Y + H), (X, Y + K)]
     fb = s.shapes.build_freeform(int(pts[0][0]), int(pts[0][1]), scale=1)
     fb.add_line_segments([(int(px), int(py)) for px, py in pts[1:]], close=True)
     sp = fb.convert_to_shape()
-    if fill is None:
-        sp.fill.background()
-    else:
-        sp.fill.solid(); sp.fill.fore_color.rgb = C(fill)
-    if line is None:
-        sp.line.fill.background()
+    if fill is None: sp.fill.background()
+    else: sp.fill.solid(); sp.fill.fore_color.rgb = C(fill)
+    if line is None: sp.line.fill.background()
     else:
         sp.line.color.rgb = C(line); sp.line.width = Pt(lw)
         if dash:
             ln = sp.line._get_or_add_ln()
             ln.append(ln.makeelement(qn('a:prstDash'), {'val': dash}))
-    _no_shadow(sp)
-    sp.text_frame.word_wrap = True
+    _no_shadow(sp); sp.text_frame.word_wrap = True
     return sp
 
 def alpha(shape, pct):
-    """pct = opacity 0..100 on a solid fill."""
-    spPr = shape.fill._xPr
-    sf = spPr.find(qn('a:solidFill'))
-    clr = sf.find(qn('a:srgbClr'))
+    clr = shape.fill._xPr.find(qn('a:solidFill')).find(qn('a:srgbClr'))
     clr.append(clr.makeelement(qn('a:alpha'), {'val': str(int(pct * 1000))}))
 
 def txt(s, x, y, w, h, paras, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, sp_after=4, lsp=1.0):
-    """paras: list of paragraphs; each = list of (text, opts) runs.
-    opts: size,color,bold,italic,font,spc"""
     box = s.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
-    tf = box.text_frame
-    tf.word_wrap = True
+    tf = box.text_frame; tf.word_wrap = True
     tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
     tf.vertical_anchor = anchor
     for i, runs in enumerate(paras):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-        p.alignment = align
-        p.space_after = Pt(sp_after)
-        p.line_spacing = lsp
+        p.alignment = align; p.space_after = Pt(sp_after); p.line_spacing = lsp
         for t, o in runs:
             r = p.add_run(); r.text = t
             f = r.font
-            f.size = Pt(o.get('size', 13))
-            f.bold = o.get('bold', False)
-            f.italic = o.get('italic', False)
-            f.name = o.get('font', BODY)
-            f.color.rgb = C(o.get('color', LIGHT))
+            f.size = Pt(o.get('size', 13)); f.bold = o.get('bold', False)
+            f.italic = o.get('italic', False); f.name = o.get('font', FONT)
+            f.color.rgb = C(o.get('color', BODYTX))
             if o.get('spc'): set_spc(r, o['spc'])
     return box
 
-def M(t, **kw):  # mono run helper
-    o = {'font': MONO}; o.update(kw); return (t, o)
+def K(t, **kw):  # kicker / HUD label run
+    o = {'size': 10, 'color': ACC, 'bold': True, 'spc': 140}; o.update(kw); return (t, o)
 
-def bullets(s, x, y, w, items, size=12.5, color=LIGHT, marker="▸ ", mcolor=TEAL, gap=5, lsp=1.02, bold=False):
+def bullets(s, x, y, w, items, size=12.5, color=BODYTX, marker="▸ ", mcolor=ACC, gap=5, lsp=1.02):
     paras = []
     for it in items:
         if isinstance(it, tuple):
             head, rest = it
-            paras.append([(marker, {'font': MONO, 'size': size, 'color': mcolor, 'bold': True}),
-                          (head, {'size': size, 'color': LIME, 'bold': True}),
-                          (rest, {'size': size, 'color': color, 'bold': bold})])
+            paras.append([(marker, {'size': size, 'color': mcolor, 'bold': True}),
+                          (head, {'size': size, 'color': NAVY, 'bold': True}),
+                          (rest, {'size': size, 'color': color})])
         else:
-            paras.append([(marker, {'font': MONO, 'size': size, 'color': mcolor, 'bold': True}),
-                          (it, {'size': size, 'color': color, 'bold': bold})])
+            paras.append([(marker, {'size': size, 'color': mcolor, 'bold': True}),
+                          (it, {'size': size, 'color': color})])
     return txt(s, x, y, w, 4.0, paras, sp_after=gap, lsp=lsp)
 
-def chip(s, x, y, w, label, fill=CARD_ACT, line=TEAL, tcolor=LIME, size=12.5, h=0.34, spc=60):
+def chip(s, x, y, w, label, fill=ACC_BG, line="BAE6FD", tcolor=ACC_DK, size=12.5, h=0.34, spc=60):
     c = chamfer(s, x, y, w, h, cut=0.10, fill=fill, line=line, lw=1.0)
     tf = c.text_frame
     tf.margin_left = Inches(0.12); tf.margin_right = Inches(0.06)
     tf.margin_top = tf.margin_bottom = 0
     tf.vertical_anchor = MSO_ANCHOR.MIDDLE
-    p = tf.paragraphs[0]
-    r = p.add_run(); r.text = label
-    r.font.size = Pt(size); r.font.bold = True; r.font.name = BODY
+    p = tf.paragraphs[0]; r = p.add_run(); r.text = label
+    r.font.size = Pt(size); r.font.bold = True; r.font.name = FONT
     r.font.color.rgb = C(tcolor); set_spc(r, spc)
     return c
 
 def img_fit(s, path, x, y, w, h):
-    """contain-fit picture inside box, centered."""
     iw, ih = Image.open(path).size
     ar = iw / ih
-    bw, bh = w, h
-    if bw / bh > ar:
-        nh = bh; nw = bh * ar
-    else:
-        nw = bw; nh = bw / ar
-    px = x + (bw - nw) / 2; py = y + (bh - nh) / 2
-    return s.shapes.add_picture(path, Inches(px), Inches(py), Inches(nw), Inches(nh))
+    if w / h > ar: nh = h; nw = h * ar
+    else: nw = w; nh = w / ar
+    return s.shapes.add_picture(path, Inches(x + (w - nw) / 2), Inches(y + (h - nh) / 2), Inches(nw), Inches(nh))
 
-def phone(s, path, x, y, h, caption=None, cap_color=MUTED):
-    w = h * (860.0 / 1864.0)
-    fr = rect(s, x, y, w, h, fill=DEEP, line=STROKE_HI, lw=1.25, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
-    fr.adjustments[0] = 0.055
-    pad = 0.055
+SHOT_AR = 440.0 / 956.0
+def phone(s, name, x, y, h, caption=None):
+    path = os.path.join(SHOTS, name + ".png")
+    w = h * SHOT_AR
+    fr = rect(s, x, y, w, h, fill=CARD, line=BORDERHI, lw=1.25, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+    fr.adjustments[0] = 0.045
+    pad = 0.045
     s.shapes.add_picture(path, Inches(x + pad), Inches(y + pad), Inches(w - 2 * pad), Inches(h - 2 * pad))
     if caption:
-        txt(s, x - 0.25, y + h + 0.06, w + 0.5, 0.5,
-            [[M(caption, size=8.5, color=cap_color, spc=20)]], align=PP_ALIGN.CENTER, sp_after=0)
+        txt(s, x - 0.3, y + h + 0.05, w + 0.6, 0.4,
+            [[K(caption, size=8, color=MUTED, spc=40)]], align=PP_ALIGN.CENTER, sp_after=0)
     return w
 
-def arrow(s, x1, y1, x2, y2, color=TEAL, w=1.5, dash=None, head=True):
+def arrow(s, x1, y1, x2, y2, color=ACC, w=1.5, dash=None, head=True):
     cn = s.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Inches(x1), Inches(y1), Inches(x2), Inches(y2))
     cn.line.color.rgb = C(color); cn.line.width = Pt(w)
     ln = cn.line._get_or_add_ln()
-    if dash:
-        ln.append(ln.makeelement(qn('a:prstDash'), {'val': dash}))
-    if head:
-        ln.append(ln.makeelement(qn('a:tailEnd'), {'type': 'triangle', 'w': 'med', 'len': 'med'}))
+    if dash: ln.append(ln.makeelement(qn('a:prstDash'), {'val': dash}))
+    if head: ln.append(ln.makeelement(qn('a:tailEnd'), {'type': 'triangle', 'w': 'med', 'len': 'med'}))
     _no_shadow(cn)
     return cn
 
-SE_LOGO  = os.path.join(REF, "xref_37.png")
-SEAL     = os.path.join(REF, "xref_14.png")
-BANNER   = os.path.join(REF, "xref_9.png")
-HXLOGO   = os.path.join(LOGO, "harmonix_logo.png")
+SE_LOGO = os.path.join(REF, "xref_37.png")
+SEAL    = os.path.join(REF, "xref_14.png")
+BANNER  = os.path.join(REF, "xref_9.png")
+HXLOGO  = os.path.join(LOGO, "harmonix_logo.png")
 
 PAGEN = [0]
-def header(s, kicker, title, logos=True):
+def header(s, kicker, title):
     PAGEN[0] += 1
-    # corner HUD brackets
     L = 0.26
     for (cx, cy, dx, dy) in [(0.18, 0.18, 1, 1), (SW - 0.18, 0.18, -1, 1), (0.18, SH - 0.18, 1, -1), (SW - 0.18, SH - 0.18, -1, -1)]:
         hy = cy if dy > 0 else cy - 0.02
         vx = cx if dx > 0 else cx - 0.02
         vy = cy if dy > 0 else cy - L
-        rect(s, vx, vy, 0.02, L, fill=STROKE_HI)
-        rect(s, cx if dx > 0 else cx - L, hy, L, 0.02, fill=STROKE_HI)
-    if logos:
-        s.shapes.add_picture(SE_LOGO, Inches(0.42), Inches(0.24), height=Inches(0.60))
-        s.shapes.add_picture(SEAL, Inches(SW - 1.12), Inches(0.20), height=Inches(0.70))
-    txt(s, 0.5, 1.02, 9.5, 0.3, [[M("// " + kicker, size=10.5, color=TEAL, spc=140)]], sp_after=0)
-    txt(s, 0.48, 1.26, 11.0, 0.62, [[(title, {'size': 27, 'bold': True, 'color': LIGHT, 'spc': 40})]], sp_after=0)
-    rect(s, 0.52, 1.86, 1.55, 0.045, fill=TEAL)
-    rect(s, 2.12, 1.86, 0.16, 0.045, fill=LIME)
-    # footer
-    s.shapes.add_picture(HXLOGO, Inches(0.5), Inches(SH - 0.52), height=Inches(0.30))
-    txt(s, 0.92, SH - 0.47, 7.5, 0.3,
-        [[M("HARMONIX-AR", size=8.5, color=MUTED, spc=80), M("  //  SOFTWARE ENGINEERING CAPSTONE · 2026", size=8.5, color=STROKE_HI, spc=60)]], sp_after=0)
-    txt(s, SW - 1.3, SH - 0.47, 0.8, 0.3, [[M(f"{PAGEN[0]:02d}", size=9, color=TEAL, spc=60)]], align=PP_ALIGN.RIGHT, sp_after=0)
+        rect(s, vx, vy, 0.02, L, fill=BORDERHI)
+        rect(s, cx if dx > 0 else cx - L, hy, L, 0.02, fill=BORDERHI)
+    s.shapes.add_picture(SE_LOGO, Inches(0.42), Inches(0.24), height=Inches(0.60))
+    s.shapes.add_picture(SEAL, Inches(SW - 1.12), Inches(0.20), height=Inches(0.70))
+    txt(s, 0.5, 1.02, 9.5, 0.3, [[K("// " + kicker, size=10.5, spc=160)]], sp_after=0)
+    txt(s, 0.48, 1.26, 11.2, 0.62, [[(title, {'size': 27, 'bold': True, 'color': NAVY, 'spc': 20})]], sp_after=0)
+    rect(s, 0.52, 1.86, 1.55, 0.05, fill=ACC)
+    rect(s, 2.12, 1.86, 0.16, 0.05, fill=VOLT)
+    s.shapes.add_picture(HXLOGO, Inches(0.5), Inches(SH - 0.50), height=Inches(0.28))
+    txt(s, 0.88, SH - 0.46, 8.0, 0.3,
+        [[("HARMONIX-AR", {'size': 8.5, 'color': MUTED, 'bold': True, 'spc': 80}),
+          ("   //   SOFTWARE ENGINEERING CAPSTONE · 2026", {'size': 8.5, 'color': BORDERHI, 'spc': 60})]], sp_after=0)
+    txt(s, SW - 1.3, SH - 0.46, 0.8, 0.3, [[(f"{PAGEN[0]:02d}", {'size': 9, 'color': ACC, 'bold': True, 'spc': 60})]], align=PP_ALIGN.RIGHT, sp_after=0)
 
-def glow(s, x, y, d, color=TEAL, pct=7):
-    o = rect(s, x, y, d, d, fill=color, shape=MSO_SHAPE.OVAL)
-    alpha(o, pct)
-    return o
+def table(s, rows, x, y, w, colw, rowh=0.55, headh=0.34, fs=8.8):
+    ts = s.shapes.add_table(len(rows), len(colw), Inches(x), Inches(y), Inches(w), Inches(headh + rowh * (len(rows) - 1)))
+    t = ts.table
+    t.first_row = False; t.horz_banding = False
+    for i, cw in enumerate(colw): t.columns[i].width = Inches(cw)
+    for ri, row in enumerate(rows):
+        t.rows[ri].height = Inches(headh if ri == 0 else rowh)
+        for ci, val in enumerate(row):
+            cell = t.cell(ri, ci)
+            cell.margin_left = Inches(0.08); cell.margin_right = Inches(0.06)
+            cell.margin_top = Inches(0.02); cell.margin_bottom = Inches(0.02)
+            cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = C(SURF if ri == 0 else (CARD if ri % 2 else BG))
+            p = cell.text_frame.paragraphs[0]
+            r = p.add_run(); r.text = val
+            r.font.size = Pt(fs + 0.7 if ri == 0 else fs)
+            r.font.bold = (ri == 0 or ci == 0)
+            r.font.name = FONT
+            r.font.color.rgb = C(NAVY if ri == 0 else (ACC_DK if ci == 0 else BODYTX))
+    return t
 
-# ================================================================ 1 · TITLE
-s = slide()
-glow(s, -2.2, -2.6, 7.5, TEAL, 8)
-glow(s, 9.4, 3.6, 6.6, VOLT, 6)
-glow(s, 5.2, 5.6, 4.4, TEAL, 5)
-# university banner on light chip (exact logo from reference deck)
-bw, bh = 7.6, 1.02
-chipbg = rect(s, (SW - bw) / 2 - 0.16, 0.30, bw + 0.32, bh + 0.24, fill="F5FDFF", shape=MSO_SHAPE.ROUNDED_RECTANGLE)
-chipbg.adjustments[0] = 0.10
-s.shapes.add_picture(BANNER, Inches((SW - bw) / 2), Inches(0.42), width=Inches(bw))
-txt(s, 1.0, 1.78, SW - 2.0, 0.32, [[M("CAPSTONE PROJECT", size=13, color=LIME, spc=300)]], align=PP_ALIGN.CENTER, sp_after=0)
-txt(s, 0.9, 2.16, SW - 1.8, 1.7,
-    [[("HARMONIX-AR: BROWSER-NATIVE CHLADNI RESONANCE IMAGING &", {'size': 26, 'bold': True, 'color': LIGHT, 'spc': 20})],
-     [("AI-ASSISTED NON-DESTRUCTIVE TESTING OF PLATE STRUCTURES", {'size': 26, 'bold': True, 'color': LIGHT, 'spc': 20})]],
-    align=PP_ALIGN.CENTER, sp_after=2, lsp=1.05)
-txt(s, 1.0, 3.62, SW - 2.0, 0.35, [[M("SOFTWARE ENGINEERING CAPSTONE", size=14, color=TEAL, spc=220)]], align=PP_ALIGN.CENTER, sp_after=0)
-rect(s, SW / 2 - 1.9, 4.06, 3.8, 0.03, fill=STROKE)
-# supervision / presenter blocks
-chip(s, 0.95, 4.55, 3.5, "UNDER THE SUPERVISION OF:", fill=DEEP, line=STROKE, tcolor=MUTED, size=10.5)
-txt(s, 1.15, 4.98, 4.5, 0.4, [[("Dr.Surendran R", {'size': 17, 'bold': True, 'color': LIGHT})]], sp_after=0)
-chip(s, 8.35, 4.55, 2.6, "PRESENTED BY:", fill=DEEP, line=STROKE, tcolor=MUTED, size=10.5)
-txt(s, 8.55, 4.98, 4.4, 0.4, [[("NANDHEESA PRASAD K", {'size': 15, 'bold': True, 'color': LIGHT}),
-                               M("  ·  192511181", size=12, color=TEAL, spc=40)]], sp_after=0)
-# app emblem + wordmark
-s.shapes.add_picture(HXLOGO, Inches(SW / 2 - 0.42), Inches(5.35), height=Inches(0.86))
-txt(s, 2.0, 6.32, SW - 4.0, 0.3,
-    [[("HARMONIX", {'size': 16, 'bold': True, 'color': LIGHT, 'spc': 260}),
-      ("  AR  ", {'size': 9, 'bold': True, 'color': BG, 'font': MONO})],
-     ], align=PP_ALIGN.CENTER, sp_after=0)
-txt(s, 2.0, 6.62, SW - 4.0, 0.3, [[M("ACOUSTIC RESONANCE & NDT INTELLIGENCE", size=9, color=MUTED, spc=240)]], align=PP_ALIGN.CENTER, sp_after=0)
-rect(s, SW / 2 + 0.52, 6.36, 0.34, 0.20, fill=VOLT)
+# ================================================================ 1 · TITLE (reference replica)
+s = slide(grid=False)
+s.shapes.add_picture(BANNER, Inches(1.48), Inches(0.30), width=Inches(10.34))
+txt(s, 1.0, 2.02, SW - 2.0, 0.5, [[("CAPSTONE PROJECT", {'size': 22, 'bold': True, 'color': "000000", 'font': SERIF, 'spc': 40})]], align=PP_ALIGN.CENTER, sp_after=0)
+txt(s, 0.7, 2.62, SW - 1.4, 1.3,
+    [[("HARMONIX-AR: BROWSER-NATIVE CHLADNI RESONANCE IMAGING &", {'size': 26, 'bold': True, 'color': REFBLUE, 'font': SERIF})],
+     [("AI-ASSISTED NON-DESTRUCTIVE TESTING OF PLATE STRUCTURES", {'size': 26, 'bold': True, 'color': REFBLUE, 'font': SERIF})]],
+    align=PP_ALIGN.CENTER, sp_after=2, lsp=1.1)
+txt(s, 1.0, 4.18, SW - 2.0, 0.45, [[("SOFTWARE ENGINEERING CAPSTONE", {'size': 18, 'bold': True, 'color': "000000", 'font': SERIF})]], align=PP_ALIGN.CENTER, sp_after=0)
+txt(s, 0.55, 5.05, 5.0, 0.9,
+    [[("UNDER THE SUPERVISION OF:", {'size': 15, 'bold': True, 'color': "000000", 'font': SERIF})],
+     [("        Dr.Surendran R", {'size': 15, 'bold': True, 'color': "000000", 'font': SERIF})]], sp_after=8)
+txt(s, 9.55, 5.05, 3.4, 0.9,
+    [[("PRESENTED BY:", {'size': 15, 'bold': True, 'color': "000000", 'font': SERIF})],
+     [("NANDHEESA PRASAD K-192511181", {'size': 14, 'bold': True, 'color': "000000", 'font': SERIF})]], sp_after=8)
+txt(s, 1.0, 6.85, SW - 2.0, 0.3, [[("CAPSTONE PROJECT", {'size': 10, 'color': MUTED, 'font': SERIF, 'spc': 120})]], align=PP_ALIGN.CENTER, sp_after=0)
 
 # ================================================================ 2 · INTRODUCTION
 s = slide(); header(s, "01 · INTRODUCTION", "INTRODUCTION")
 chip(s, 0.5, 2.05, 1.55, "Background")
 txt(s, 0.5, 2.48, 7.3, 1.0,
-    [[("Chladni figures (1787) make the nodal lines of a vibrating plate visible. Those modal fingerprints encode ", {'size': 12.5, 'color': LIGHT}),
-      ("geometry, material, boundary conditions and internal damage", {'size': 12.5, 'color': LIME, 'bold': True}),
-      (" — the physical basis of vibration-based non-destructive testing (NDT).", {'size': 12.5, 'color': LIGHT})]], lsp=1.05)
+    [[("Chladni figures (1787) make the nodal lines of a vibrating plate visible. Those modal fingerprints encode ", {'size': 12.5, 'color': BODYTX}),
+      ("geometry, material, boundary conditions and internal damage", {'size': 12.5, 'color': ACC_DK, 'bold': True}),
+      (" — the physical basis of vibration-based non-destructive testing (NDT).", {'size': 12.5, 'color': BODYTX})]], lsp=1.05)
 chip(s, 0.5, 3.42, 2.35, "Need for the System")
 bullets(s, 0.5, 3.85, 7.3, [
     "Classical modal labs need sand, shakers, LDV / impedance analysers — costly & bench-bound.",
@@ -280,19 +270,17 @@ bullets(s, 0.5, 5.71, 7.3, [
     "Computer-vision quad detection + autocorrelation audio resonance lock.",
     "Kirchhoff–Love plate physics + DINOv2 / AST / PINN AI microservice.",
 ], size=12)
-# right visuals: existing solution
-txt(s, 8.15, 2.02, 4.7, 0.3, [[M("EXISTING SOLUTION", size=10, color=WARN, spc=160)]], sp_after=0)
-img_fit(s, os.path.join(IMG, "chladni-plate-vibration-resonance-sand-p-1.png"), 8.15, 2.32, 2.30, 1.75)
-img_fit(s, os.path.join(IMG, "non-destructive-testing-ultrasonic-inspe-2.jpg"), 10.55, 2.32, 2.30, 1.75)
-txt(s, 8.15, 4.12, 4.7, 0.5,
-    [[M("Sand-plate Chladni rig & handheld UT probe — slow, wired, expert-only.", size=8.5, color=MUTED, spc=10)]], sp_after=0)
-a = chamfer(s, 9.05, 4.62, 2.9, 0.5, cut=0.12, fill=VOLT, line=None)
+txt(s, 8.15, 2.02, 4.7, 0.3, [[K("EXISTING SOLUTION", size=10, color=WARN, spc=160)]], sp_after=0)
+img_fit(s, os.path.join(IMG, "chladni-plate-vibration-resonance-sand-p-1.png"), 8.15, 2.32, 2.30, 1.72)
+img_fit(s, os.path.join(IMG, "non-destructive-testing-ultrasonic-inspe-2.jpg"), 10.55, 2.32, 2.30, 1.72)
+txt(s, 8.15, 4.08, 4.7, 0.4, [[("Sand-plate Chladni rig & handheld UT probe — slow, wired, expert-only.", {'size': 8.5, 'color': MUTED})]], sp_after=0)
+a = chamfer(s, 9.05, 4.52, 2.9, 0.5, cut=0.12, fill=NAVY, line=None)
 tf = a.text_frame; tf.vertical_anchor = MSO_ANCHOR.MIDDLE
 p = tf.paragraphs[0]; p.alignment = PP_ALIGN.CENTER
 r = p.add_run(); r.text = "HARMONIX-AR  →  browser-only"
-r.font.size = Pt(11); r.font.bold = True; r.font.color.rgb = C(BG); r.font.name = MONO
-txt(s, 8.15, 5.16, 4.7, 0.2, [[M("PROPOSED · LIVE GPU MODAL VIEWPORT", size=8.5, color=TEAL, spc=80)]], align=PP_ALIGN.CENTER, sp_after=0)
-img_fit(s, os.path.join(UI, "05_Live_resonance.png"), 8.85, 5.38, 3.4, 1.55)
+r.font.size = Pt(11); r.font.bold = True; r.font.color.rgb = C("FFFFFF"); r.font.name = FONT
+txt(s, 8.15, 5.14, 4.7, 0.2, [[K("PROPOSED · LIVE AR VIEWPORT (REAL SCREEN)", size=8.5, spc=80)]], align=PP_ALIGN.CENTER, sp_after=0)
+phone(s, "viewport", 9.62, 5.36, 1.62)
 
 # ================================================================ 3 · OBJECTIVE
 s = slide(); header(s, "02 · OBJECTIVE", "OBJECTIVE")
@@ -309,32 +297,32 @@ bullets(s, 0.5, 5.0, 7.4, [
     "Interactive what-if analysis: virtual standoff pins & component placement safety check.",
     "Secure multi-user sessions (Google OAuth + Postgres RLS), voice guide and i18n locale screen.",
 ], size=12.5, gap=6)
-phone(s, os.path.join(UI, "07_Vibration_Patterns.png"), 9.55, 2.05, 4.85, "LIVE MODAL COMPARISON SCREEN")
-chamfer(s, 8.35, 2.6, 1.0, 3.0, cut=0.1, fill=DEEP, line=STROKE)
-txt(s, 8.42, 2.75, 0.9, 2.8, [[M("OBJ", size=9, color=TEAL, spc=120)], [M("-01", size=9, color=MUTED)], [M("OBJ", size=9, color=TEAL, spc=120)], [M("-02", size=9, color=MUTED)], [M("OBJ", size=9, color=TEAL, spc=120)], [M("-03", size=9, color=MUTED)]], sp_after=8)
+phone(s, "modes", 9.55, 2.0, 4.75, "6. SHAPES — HARMONIC EIGENMODE GALLERY")
+chamfer(s, 8.35, 2.6, 1.0, 3.0, cut=0.1, fill=SURF, line=BORDER)
+txt(s, 8.42, 2.75, 0.9, 2.8, [[K("OBJ", size=9, spc=120)], [("01", {'size': 9, 'color': MUTED})], [K("OBJ", size=9, spc=120)], [("02", {'size': 9, 'color': MUTED})], [K("OBJ", size=9, spc=120)], [("03", {'size': 9, 'color': MUTED})]], sp_after=8)
 
 # ================================================================ 4 · PROBLEM STATEMENT
 s = slide(); header(s, "03 · PROBLEM STATEMENT", "PROBLEM STATEMENT")
 chip(s, 0.5, 2.1, 2.3, "Existing Problems")
 bullets(s, 0.5, 2.55, 7.2, [
-    "Experimental modal analysis demands shakers, laser Doppler vibrometers or impedance heads — ₹₹ expensive, lab-only.",
+    "Experimental modal analysis demands shakers, laser Doppler vibrometers or impedance heads — expensive, lab-only.",
     "Manual coin/tap testing is qualitative; two inspectors disagree.",
     "FEM modal solves are offline and compute-heavy — unusable at the shop floor.",
     "Published CV-for-Chladni research is batch/offline: photos → training → prediction, no interactive loop.",
     "No traceable digital record binds geometry + resonance evidence to a report.",
 ], size=12.5, gap=7)
-chip(s, 0.5, 5.35, 2.3, "Problem Definition", fill=CARD_ACT, line=LIME)
+chip(s, 0.5, 5.35, 2.3, "Problem Definition", fill=ACC_BG, line=ACC)
 txt(s, 0.5, 5.78, 7.4, 1.2,
-    [[("Design and implement a web-native system that captures workpiece geometry through the camera, locks resonance through the microphone, images modal nodal fields in real time on the GPU, infers stress & subsurface anomalies with physics + AI, and exports audit-grade reports — ", {'size': 12.5, 'color': LIGHT}),
-      ("using only commodity hardware.", {'size': 12.5, 'color': LIME, 'bold': True})]], lsp=1.08)
-img_fit(s, os.path.join(IMG, "von-mises-stress-fea-finite-element-heat-1.jpg"), 8.2, 2.1, 4.6, 2.5)
-txt(s, 8.2, 4.62, 4.6, 0.4, [[M("OFFLINE FEA — ACCURATE BUT BENCH-BOUND & SLOW", size=8.5, color=MUTED, spc=40)]], align=PP_ALIGN.CENTER, sp_after=0)
-chamfer(s, 8.2, 5.15, 4.6, 1.55, cut=0.14, fill=DEEP, line=DANGER, lw=1.2)
-txt(s, 8.45, 5.32, 4.1, 1.3,
-    [[M("GAP", size=10, color=DANGER, spc=200)],
-     [("No prior system closes the loop: ", {'size': 11.5, 'color': LIGHT}),
-      ("sense → image → infer → report", {'size': 11.5, 'color': LIME, 'bold': True, 'font': MONO}),
-      (" in real time, in a browser, with zero instrumentation.", {'size': 11.5, 'color': LIGHT})]], sp_after=4)
+    [[("Design and implement a web-native system that captures workpiece geometry through the camera, locks resonance through the microphone, images modal nodal fields in real time on the GPU, infers stress & subsurface anomalies with physics + AI, and exports audit-grade reports — ", {'size': 12.5, 'color': BODYTX}),
+      ("using only commodity hardware.", {'size': 12.5, 'color': ACC_DK, 'bold': True})]], lsp=1.08)
+img_fit(s, os.path.join(IMG, "von-mises-stress-fea-finite-element-heat-1.jpg"), 8.2, 2.1, 4.6, 2.45)
+txt(s, 8.2, 4.58, 4.6, 0.35, [[K("OFFLINE FEA — ACCURATE BUT BENCH-BOUND & SLOW", size=8.5, color=MUTED, spc=40)]], align=PP_ALIGN.CENTER, sp_after=0)
+chamfer(s, 8.2, 5.05, 4.6, 1.6, cut=0.14, fill=DANGER_BG, line=DANGER, lw=1.2)
+txt(s, 8.45, 5.22, 4.1, 1.3,
+    [[K("GAP", size=10, color=DANGER, spc=200)],
+     [("No prior system closes the loop: ", {'size': 11.5, 'color': BODYTX}),
+      ("sense → image → infer → report", {'size': 11.5, 'color': DANGER, 'bold': True}),
+      (" in real time, in a browser, with zero instrumentation.", {'size': 11.5, 'color': BODYTX})]], sp_after=4)
 
 # ================================================================ 5 · LITERATURE REVIEW
 s = slide(); header(s, "04 · LITERATURE SURVEY", "LITERATURE REVIEW")
@@ -348,36 +336,17 @@ rows = [
     ("6", "Materials 19(1):205, 2026", "ANN surrogate replacing FE eigen-solves for variable-thickness plate frequencies", "Orders-of-magnitude faster than FEM; accuracy degrades with free-edge boundary cases."),
     ("7", "arXiv:2507.12563, 2025", "Benchmark of neural surrogates for nonlinear elastic-plate physical-modelling synthesis", "Confirms neural plate surrogates viable in real time; target is audio synthesis, not inspection."),
 ]
-tbl_shape = s.shapes.add_table(len(rows), 4, Inches(0.5), Inches(1.98), Inches(12.35), Inches(4.5))
-tbl = tbl_shape.table
-tbl.first_row = False; tbl.horz_banding = False
-for i, w in enumerate([0.42, 3.15, 4.35, 4.43]):
-    tbl.columns[i].width = Inches(w)
-for ri, row in enumerate(rows):
-    tbl.rows[ri].height = Inches(0.32 if ri == 0 else 0.60)
-    for ci, val in enumerate(row):
-        cell = tbl.cell(ri, ci)
-        cell.margin_left = Inches(0.08); cell.margin_right = Inches(0.06)
-        cell.margin_top = Inches(0.03); cell.margin_bottom = Inches(0.03)
-        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
-        cell.fill.solid()
-        cell.fill.fore_color.rgb = C(ITEM if ri == 0 else (CARD if ri % 2 else DEEP))
-        p = cell.text_frame.paragraphs[0]
-        r = p.add_run(); r.text = val
-        r.font.size = Pt(9.5 if ri == 0 else 8.6)
-        r.font.bold = (ri == 0 or ci == 0)
-        r.font.name = MONO if (ri == 0 or ci == 0) else BODY
-        r.font.color.rgb = C(LIME if ri == 0 else (TEAL if ci == 0 else LIGHT))
+table(s, rows, 0.5, 1.98, 12.35, [0.42, 3.15, 4.35, 4.43], rowh=0.60, headh=0.32, fs=8.6)
 txt(s, 0.5, 6.60, 12.3, 0.5,
-    [[M("SYNTHESIS ▸ ", size=10.5, color=TEAL, spc=80),
-      ("Every prior thread is offline, instrument-bound or single-modality. HARMONIX-AR fuses optics + acoustics + physics + AI into one real-time, instrument-free, browser-native inspection loop with audit export.", {'size': 10.5, 'color': LIGHT})]], sp_after=0)
+    [[K("SYNTHESIS ▸ ", size=10.5, spc=80),
+      ("Every prior thread is offline, instrument-bound or single-modality. HARMONIX-AR fuses optics + acoustics + physics + AI into one real-time, instrument-free, browser-native inspection loop with audit export.", {'size': 10.5, 'color': BODYTX})]], sp_after=0)
 
 # ================================================================ 6 · PROPOSED SYSTEM
 s = slide(); header(s, "05 · PROPOSED SYSTEM", "PROPOSED SYSTEM")
 txt(s, 0.5, 2.05, 7.5, 1.5,
-    [[("HARMONIX-AR turns a browser tab into an NDT bench. The camera frames the workpiece and four draggable pins solve its true millimetre geometry; the microphone listens to the excitation and an autocorrelation pitch-detector locks resonance; a WebGPU compute shader animates ", {'size': 12, 'color': LIGHT}),
-      ("32,768 particles", {'size': 12, 'color': LIME, 'bold': True}),
-      (" into the live Chladni nodal field of the selected (m, n) mode; a FastAPI + PyTorch microservice adds DINOv2 segmentation, AST acoustic embeddings and a physics-informed modal surrogate with virtual standoffs; von Mises & Basquin fatigue maths convert modes into stress maps and defect likelihood; everything exports as DXF/PDF and persists to Supabase with row-level security.", {'size': 12, 'color': LIGHT})]], lsp=1.08)
+    [[("HARMONIX-AR turns a browser tab into an NDT bench. The camera frames the workpiece and four draggable pins solve its true millimetre geometry; the microphone listens to the excitation and an autocorrelation pitch-detector locks resonance; a WebGPU compute shader animates ", {'size': 12, 'color': BODYTX}),
+      ("32,768 particles", {'size': 12, 'color': ACC_DK, 'bold': True}),
+      (" into the live Chladni nodal field of the selected (m, n) mode; a FastAPI + PyTorch microservice adds DINOv2 segmentation, AST acoustic embeddings and a physics-informed modal surrogate with virtual standoffs; von Mises & Basquin fatigue maths convert modes into stress maps and defect likelihood; everything exports as DXF/PDF and persists to Supabase with row-level security.", {'size': 12, 'color': BODYTX})]], lsp=1.08)
 chip(s, 0.5, 3.85, 1.85, "Key Features")
 bullets(s, 0.5, 4.28, 7.4, [
     "Real-time GPU Chladni imaging with 64×64 amplitude/gradient LUT (O(1) per frame).",
@@ -387,17 +356,17 @@ bullets(s, 0.5, 4.28, 7.4, [
     "Safety planner: drag components, see nodal-line clearance before mounting.",
     "DXF vector + PDF audit export; RLS-secured inspection log; offline fallback engine.",
 ], size=11.8, gap=5)
-phone(s, os.path.join(UI, "02_New_inspection.png"), 8.5, 2.02, 3.35, "02 · NEW INSPECTION")
-phone(s, os.path.join(UI, "08_Defect_review.png"), 10.85, 2.02, 3.35, "08 · DEFECT REVIEW")
-chamfer(s, 8.5, 5.85, 4.45, 0.95, cut=0.12, fill=DEEP, line=TEAL)
+phone(s, "scan", 8.5, 2.02, 3.35, "2. SCAN — EDGE DETECTION + P1–P4")
+phone(s, "defects", 10.85, 2.02, 3.35, "9. DEFECTS — ANOMALY CALLER")
+chamfer(s, 8.5, 5.85, 4.45, 0.95, cut=0.12, fill=SURF, line=BORDER)
 txt(s, 8.7, 5.98, 4.1, 0.75,
-    [[M("12-SCREEN GUIDED FLOW  ", size=9.5, color=TEAL, spc=80),
-      M("language → auth → setup → scan → material → viewport → tuner → modes → safety → stress → defects → export", size=8.2, color=MUTED)]], lsp=1.15, sp_after=0)
+    [[K("12-SCREEN GUIDED FLOW  ", size=9.5, spc=80),
+      ("language → auth → setup → scan → material → viewport → tuner → modes → safety → stress → defects → export", {'size': 8.2, 'color': MUTED})]], lsp=1.15, sp_after=0)
 
 # ================================================================ 7 · TOOLS & TECHNOLOGIES
 s = slide(); header(s, "06 · TOOLKIT", "TOOLS & TECHNOLOGIES USED")
 cols = [
-    ("TECHNOLOGIES", TEAL, [
+    ("TECHNOLOGIES", ACC, [
         "Computer vision — edge/quad detection, P1–P4 homography",
         "WebGPU compute shaders (WGSL) particle dynamics",
         "Web Audio DSP — autocorrelation pitch & resonance lock",
@@ -406,7 +375,7 @@ cols = [
         "Vision & audio transformers (DINOv2-small, AST)",
         "OAuth 2.0 + Postgres Row-Level Security",
     ]),
-    ("SOFTWARE", LIME, [
+    ("SOFTWARE", ACC_DK, [
         "Next.js 15 (App Router, RSC) + React 19",
         "TypeScript 5.7 strict, Tailwind CSS 3.4 design tokens",
         "FastAPI + PyTorch microservice (uvicorn, CORS)",
@@ -427,9 +396,9 @@ cols = [
 ]
 for i, (title, tcol, items) in enumerate(cols):
     x = 0.5 + i * 4.22
-    chamfer(s, x, 2.05, 4.0, 4.75, cut=0.16, fill=CARD, line=STROKE)
-    rect(s, x, 2.05, 4.0, 0.42, fill=ITEM)
-    txt(s, x + 0.18, 2.14, 3.7, 0.3, [[M(title, size=10.5, color=tcol, spc=140)]], sp_after=0)
+    chamfer(s, x, 2.05, 4.0, 4.75, cut=0.16, fill=CARD, line=BORDER)
+    rect(s, x, 2.05, 4.0, 0.42, fill=SURF)
+    txt(s, x + 0.18, 2.14, 3.7, 0.3, [[K(title, size=10.5, color=tcol, spc=140)]], sp_after=0)
     bullets(s, x + 0.2, 2.62, 3.65, items, size=10.6, gap=7, mcolor=tcol)
 
 # ================================================================ 8 · STANDARDS
@@ -446,30 +415,29 @@ std = [
 ]
 for i, (code, desc) in enumerate(std):
     y = 2.05 + i * 0.56
-    chamfer(s, 0.5, y, 3.35, 0.48, cut=0.1, fill=DEEP, line=STROKE_HI)
-    txt(s, 0.68, y + 0.115, 3.1, 0.3, [[M(code, size=10, color=TEAL, spc=40)]], sp_after=0)
-    txt(s, 4.05, y + 0.055, 8.75, 0.45, [[(desc, {'size': 10.6, 'color': LIGHT})]], sp_after=0, lsp=0.95)
-txt(s, 0.5, 6.62, 12.3, 0.3, [[M("PROCESS ▸ ", size=9.5, color=LIME, spc=80),
+    chamfer(s, 0.5, y, 3.35, 0.48, cut=0.1, fill=SURF, line=BORDER)
+    txt(s, 0.68, y + 0.115, 3.1, 0.3, [[K(code, size=10, color=ACC_DK, spc=40)]], sp_after=0)
+    txt(s, 4.05, y + 0.055, 8.75, 0.45, [[(desc, {'size': 10.6, 'color': BODYTX})]], sp_after=0, lsp=0.95)
+txt(s, 0.5, 6.62, 12.3, 0.3, [[K("PROCESS ▸ ", size=9.5, color=ACC_DK, spc=80),
     ("Agile increments, type-safe codebase, RLS security review and per-commit Vercel preview tests map the build to IEEE 12207/1012 practice.", {'size': 9.5, 'color': MUTED})]], sp_after=0)
 
 # ================================================================ 9 · SYSTEM ARCHITECTURE
 s = slide(); header(s, "08 · ARCHITECTURE", "SYSTEM ARCHITECTURE")
 layers = [
-    ("L5 · DATA & DELIVERY", "Supabase Postgres + RLS · DXF/PDF export · Vercel edge · Google OAuth", LIME),
+    ("L5 · DATA & DELIVERY", "Supabase Postgres + RLS · DXF/PDF export · Vercel edge · Google OAuth", NAVY),
     ("L4 · DOMAIN PHYSICS ENGINE", "Kirchhoff–Love (m,n) modes · von Mises & Basquin fatigue · Q / loss-factor damping", WARN),
     ("L3 · AI MICROSERVICE (FastAPI + PyTorch)", "DINOv2-small segmentation · AST acoustic embeddings · ModalPINNSurrogate", VOLT),
-    ("L2 · EDGE PERCEPTION (React hooks)", "useBoundaryDetection · useAudioPitch · useChladniShader (WGSL compute)", TEAL),
+    ("L2 · EDGE PERCEPTION (React hooks)", "useBoundaryDetection · useAudioPitch · useChladniShader (WGSL compute)", ACC),
     ("L1 · SENSING (browser)", "Camera frames · microphone stream · touch pins P1–P4 · loudspeaker exciter", MUTED),
 ]
 for i, (t, d, col) in enumerate(layers):
     y = 2.02 + i * 0.94
-    chamfer(s, 0.5, y, 6.1, 0.80, cut=0.12, fill=CARD if i % 2 == 0 else DEEP, line=STROKE)
+    chamfer(s, 0.5, y, 6.1, 0.80, cut=0.12, fill=CARD if i % 2 == 0 else SURF, line=BORDER)
     rect(s, 0.5, y, 0.09, 0.80, fill=col)
-    txt(s, 0.75, y + 0.10, 5.7, 0.3, [[M(t, size=10.5, color=col, spc=60)]], sp_after=0)
-    txt(s, 0.75, y + 0.40, 5.7, 0.35, [[(d, {'size': 9.6, 'color': LIGHT})]], sp_after=0)
+    txt(s, 0.75, y + 0.10, 5.7, 0.3, [[K(t, size=10.5, color=col if col != MUTED else MUTED, spc=60)]], sp_after=0)
+    txt(s, 0.75, y + 0.40, 5.7, 0.35, [[(d, {'size': 9.6, 'color': BODYTX})]], sp_after=0)
     if i < 4:
-        arrow(s, 3.55, y + 0.80, 3.55, y + 0.94, color=STROKE_HI, w=1.2)
-# right: runtime flow
+        arrow(s, 3.55, y + 0.80, 3.55, y + 0.94, color=BORDERHI, w=1.2)
 rx = 7.0
 boxes = [
     (rx, 2.02, 2.85, 0.62, "NEXT.JS 15 RSC UI", "12 guided screens + HUD kit"),
@@ -480,8 +448,8 @@ boxes = [
     (rx + 3.05, 4.10, 2.85, 0.62, "EXPORT ENGINE", "DXF vector · PDF audit report"),
 ]
 for (x, y, w, h, t, d) in boxes:
-    chamfer(s, x, y, w, h, cut=0.1, fill=ITEM, line=STROKE_HI)
-    txt(s, x + 0.14, y + 0.08, w - 0.25, 0.26, [[M(t, size=9.6, color=LIME, spc=40)]], sp_after=0)
+    chamfer(s, x, y, w, h, cut=0.1, fill=CARD, line=BORDERHI)
+    txt(s, x + 0.14, y + 0.08, w - 0.25, 0.26, [[K(t, size=9.6, color=ACC_DK, spc=40)]], sp_after=0)
     txt(s, x + 0.14, y + 0.34, w - 0.25, 0.26, [[(d, {'size': 8.4, 'color': MUTED})]], sp_after=0)
 arrow(s, rx + 2.85, 2.33, rx + 3.05, 2.33, w=1.4)
 arrow(s, rx + 1.42, 2.64, rx + 1.42, 3.06, w=1.4)
@@ -489,13 +457,13 @@ arrow(s, rx + 4.47, 2.64, rx + 4.47, 3.06, w=1.4)
 arrow(s, rx + 3.05, 3.37, rx + 2.85, 3.37, w=1.4)
 arrow(s, rx + 1.42, 3.68, rx + 1.42, 4.10, w=1.4)
 arrow(s, rx + 4.47, 3.68, rx + 4.47, 4.10, w=1.4)
-chamfer(s, rx, 5.05, 5.9, 0.85, cut=0.12, fill=DEEP, line=WARN, lw=1.2, dash="dash")
+chamfer(s, rx, 5.05, 5.9, 0.85, cut=0.12, fill=WARN_BG, line=WARN, lw=1.2, dash="dash")
 txt(s, rx + 0.2, 5.16, 5.5, 0.7,
-    [[M("GRACEFUL DEGRADATION  ", size=9.5, color=WARN, spc=80),
-      ("if the AI microservice is unreachable the frontend automatically falls back to its built-in browser CV / WebAudio / analytic-physics engine — inspection never blocks.", {'size': 9.3, 'color': LIGHT})]], lsp=1.05, sp_after=0)
+    [[K("GRACEFUL DEGRADATION  ", size=9.5, color=WARN, spc=80),
+      ("if the AI microservice is unreachable the frontend automatically falls back to its built-in browser CV / WebAudio / analytic-physics engine — inspection never blocks.", {'size': 9.3, 'color': BODYTX})]], lsp=1.05, sp_after=0)
 txt(s, rx, 6.1, 5.9, 0.6,
-    [[M("DATA FLOW  ", size=9, color=TEAL, spc=80),
-      M("camera/mic → hooks → GPU viewport → AI enrich → physics infer → report → cloud log", size=8.6, color=MUTED)]], sp_after=0)
+    [[K("DATA FLOW  ", size=9, spc=80),
+      ("camera/mic → hooks → GPU viewport → AI enrich → physics infer → report → cloud log", {'size': 8.6, 'color': MUTED})]], sp_after=0)
 
 # ================================================================ 10 · FLOWCHART + ALGORITHM
 s = slide(); header(s, "09 · WORKING", "END-TO-END FLOWCHART & ALGORITHM STEPS")
@@ -515,30 +483,28 @@ ny = 1.98
 for i, (label, kind) in enumerate(nodes):
     h = 0.30 if kind in ("start", "end") else (0.44 if kind == "d" else 0.36)
     if kind == "d":
-        d = chamfer(s, 0.75, ny, 4.5, h, cut=0.22, fill=DEEP, line=WARN, lw=1.3)
+        d = chamfer(s, 0.75, ny, 4.5, h, cut=0.22, fill=WARN_BG, line=WARN, lw=1.3)
     elif kind in ("start", "end"):
-        d = chamfer(s, 1.6, ny, 2.8, h, cut=0.14, fill=ITEM, line=LIME, lw=1.2)
+        d = chamfer(s, 1.6, ny, 2.8, h, cut=0.14, fill=NAVY, line=None)
     else:
-        d = chamfer(s, 0.75, ny, 4.5, h, cut=0.10, fill=CARD, line=STROKE_HI)
+        d = chamfer(s, 0.75, ny, 4.5, h, cut=0.10, fill=CARD, line=BORDERHI)
     tf = d.text_frame; tf.vertical_anchor = MSO_ANCHOR.MIDDLE
     tf.margin_left = Inches(0.1); tf.margin_right = Inches(0.05); tf.margin_top = tf.margin_bottom = 0
     p = tf.paragraphs[0]; p.alignment = PP_ALIGN.CENTER
     r = p.add_run(); r.text = label
     r.font.size = Pt(9.3 if kind == "n" else 9.6)
     r.font.bold = kind != "n"
-    r.font.name = MONO if kind != "n" else BODY
-    r.font.color.rgb = C(LIME if kind in ("start", "end") else (WARN if kind == "d" else LIGHT))
+    r.font.name = FONT
+    r.font.color.rgb = C("FFFFFF" if kind in ("start", "end") else (WARN if kind == "d" else NAVY))
     if i < len(nodes) - 1:
-        arrow(s, 3.0, ny + h, 3.0, ny + h + 0.10, color=TEAL, w=1.3)
+        arrow(s, 3.0, ny + h, 3.0, ny + h + 0.10, color=ACC, w=1.3)
     ny += h + 0.10
-# re-sweep loop (NO branch)
 arrow(s, 5.25, 5.36, 5.75, 5.36, color=MUTED, w=1.2, head=False)
 arrow(s, 5.75, 5.36, 5.75, 3.94, color=MUTED, w=1.2, head=False)
 arrow(s, 5.75, 3.94, 5.25, 3.94, color=MUTED, w=1.2)
-txt(s, 5.32, 5.14, 1.2, 0.22, [[M("NO", size=8.5, color=MUTED)]], sp_after=0)
-txt(s, 5.32, 3.70, 1.4, 0.22, [[M("re-sweep", size=8.5, color=MUTED)]], sp_after=0)
-txt(s, 3.15, 5.60, 1.0, 0.22, [[M("YES", size=8.5, color=SAFE)]], sp_after=0)
-# algorithm table
+txt(s, 5.32, 5.14, 1.2, 0.22, [[K("NO", size=8.5, color=MUTED, spc=40)]], sp_after=0)
+txt(s, 5.32, 3.70, 1.4, 0.22, [[K("re-sweep", size=8.5, color=MUTED, spc=40)]], sp_after=0)
+txt(s, 3.15, 5.60, 1.0, 0.22, [[K("YES", size=8.5, color=SAFE, spc=40)]], sp_after=0)
 alg = [
     ("STEP", "PROCESS", "INPUT", "OUTPUT"),
     ("1", "Capture & noise floor", "Camera + mic streams", "Ambient dB baseline"),
@@ -549,148 +515,123 @@ alg = [
     ("6", "Stress & defect infer", "Modes + material", "von Mises map, anomaly score"),
     ("7", "Report & log", "Session bundle", "DXF + PDF + RLS row"),
 ]
-ts = s.shapes.add_table(len(alg), 4, Inches(6.6), Inches(2.02), Inches(6.25), Inches(4.55))
-t2 = ts.table
-t2.first_row = False; t2.horz_banding = False
-for i, w in enumerate([0.55, 1.85, 1.85, 2.0]):
-    t2.columns[i].width = Inches(w)
-for ri, row in enumerate(alg):
-    t2.rows[ri].height = Inches(0.34 if ri == 0 else 0.55)
-    for ci, val in enumerate(row):
-        cell = t2.cell(ri, ci)
-        cell.margin_left = Inches(0.07); cell.margin_right = Inches(0.05)
-        cell.margin_top = Inches(0.02); cell.margin_bottom = Inches(0.02)
-        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
-        cell.fill.solid(); cell.fill.fore_color.rgb = C(ITEM if ri == 0 else (CARD if ri % 2 else DEEP))
-        p = cell.text_frame.paragraphs[0]
-        r = p.add_run(); r.text = val
-        r.font.size = Pt(9.3 if ri == 0 else 8.8)
-        r.font.bold = (ri == 0 or ci == 0)
-        r.font.name = MONO if (ri == 0 or ci == 0) else BODY
-        r.font.color.rgb = C(LIME if ri == 0 else (TEAL if ci == 0 else LIGHT))
-txt(s, 6.6, 6.72, 6.2, 0.4, [[M("DECISION RULE ▸ ", size=9, color=WARN, spc=60),
-    ("baseline-vs-live modal shift beyond ±1.00 % tolerance, or AST anomaly ≥ θ ⇒ REVIEW NEEDED flag.", {'size': 9, 'color': LIGHT})]], sp_after=0)
+table(s, alg, 6.6, 2.02, 6.25, [0.55, 1.85, 1.85, 2.0], rowh=0.55, headh=0.32, fs=8.8)
+txt(s, 6.6, 6.72, 6.2, 0.4, [[K("DECISION RULE ▸ ", size=9, color=WARN, spc=60),
+    ("baseline-vs-live modal shift beyond ±1.00 % tolerance, or AST anomaly ≥ θ ⇒ REVIEW NEEDED flag.", {'size': 9, 'color': BODYTX})]], sp_after=0)
 
 # ================================================================ 11 · HOW IT WORKS OVERVIEW
 s = slide(); header(s, "10 · HOW IT WORKS", "HOW IT WORKS — FIVE-STAGE INSPECTION PIPELINE")
 stages = [
     ("S1", "CAPTURE & GEOMETRY", "Camera frames plate; CV edge detection + draggable P1–P4 pins solve true mm geometry & ambient noise floor."),
-    ("S2", "CALIBRATE & LOCK", "Speaker sweep excites the plate; mic autocorrelation locks resonance to 0.01 Hz and quantises the note."),
-    ("S3", "GPU MODAL IMAGING", "WebGPU WGSL compute drives 32,768 particles into the live (m,n) Chladni nodal field — virtual sand."),
-    ("S4", "STRESS & DEFECT AI", "von Mises + Basquin fatigue maps stress; AST + PINN + baseline shift call subsurface anomalies."),
-    ("S5", "REPORT & LOG", "DXF vector nodal map + PDF audit report; session persisted to Supabase under RLS."),
+    ("S2", "MATERIAL & EXCITE", "Material library sets E, ρ, ν; speaker sweep excites the plate while the Live AR viewport prepares the particle field."),
+    ("S3", "LOCK & MODAL GALLERY", "Mic autocorrelation locks resonance to 0.01 Hz; eigenmode gallery lists (m,n), f₀, Q and resonance gain."),
+    ("S4", "SAFETY & STRESS", "Drag components for nodal clearance; von Mises + Basquin fatigue paint safe / moderate / extreme zones."),
+    ("S5", "DEFECTS & REPORT", "Baseline-vs-live shift + AST anomaly call defects; DXF/PDF export and RLS log close the loop."),
 ]
 for i, (code, t, d) in enumerate(stages):
     x = 0.5 + i * 2.52
-    chamfer(s, x, 2.1, 2.32, 2.55, cut=0.14, fill=CARD if i % 2 == 0 else DEEP, line=STROKE)
-    rect(s, x, 2.1, 2.32, 0.4, fill=ITEM)
-    txt(s, x + 0.12, 2.18, 2.1, 0.28, [[M(code, size=10, color=TEAL, spc=120), M("  " + t, size=9.3, color=LIME, spc=40)]], sp_after=0)
-    txt(s, x + 0.14, 2.62, 2.05, 1.95, [[(d, {'size': 9.3, 'color': LIGHT})]], lsp=1.06, sp_after=0)
+    chamfer(s, x, 2.1, 2.32, 2.55, cut=0.14, fill=CARD if i % 2 == 0 else SURF, line=BORDER)
+    rect(s, x, 2.1, 2.32, 0.4, fill=SURF if i % 2 == 0 else CARD)
+    txt(s, x + 0.12, 2.18, 2.1, 0.28, [[K(code, size=10, spc=120), (t, {'size': 9.3, 'color': NAVY, 'bold': True, 'spc': 40})]], sp_after=0)
+    txt(s, x + 0.14, 2.62, 2.05, 1.95, [[(d, {'size': 9.3, 'color': BODYTX})]], lsp=1.06, sp_after=0)
     if i < 4:
         arrow(s, x + 2.32, 3.35, x + 2.52, 3.35, w=1.6)
-txt(s, 0.5, 4.95, 12.3, 0.3, [[M("12-SCREEN NAVIGATION FLOW (IMPLEMENTED ROUTES)", size=10, color=TEAL, spc=120)]], sp_after=0)
+txt(s, 0.5, 4.95, 12.3, 0.3, [[K("12-SCREEN NAVIGATION FLOW (IMPLEMENTED ROUTES)", size=10, spc=120)]], sp_after=0)
 flow = ["/language", "/auth", "/setup", "/scan", "/material", "/viewport", "/tuner", "/modes", "/safety", "/stress", "/defects", "/export"]
 for i, f in enumerate(flow):
     x = 0.5 + i * 1.045
-    chamfer(s, x, 5.32, 0.96, 0.42, cut=0.09, fill=ITEM if i % 2 else DEEP, line=STROKE_HI)
-    txt(s, x, 5.42, 0.96, 0.26, [[M(f, size=8.2, color=LIME if i in (5, 10) else MUTED, spc=10)]], align=PP_ALIGN.CENTER, sp_after=0)
+    chamfer(s, x, 5.32, 0.96, 0.42, cut=0.09, fill=CARD if i % 2 else SURF, line=BORDER)
+    txt(s, x, 5.42, 0.96, 0.26, [[(f, {'size': 8.2, 'color': ACC_DK if i in (5, 10) else MUTED, 'bold': i in (5, 10), 'spc': 10})]], align=PP_ALIGN.CENTER, sp_after=0)
     if i < 11:
-        arrow(s, x + 0.96, 5.53, x + 1.045, 5.53, color=STROKE_HI, w=1.0)
+        arrow(s, x + 0.96, 5.53, x + 1.045, 5.53, color=BORDERHI, w=1.0)
 txt(s, 0.5, 5.95, 12.3, 0.8,
-    [[M("AUTOPILOT ▸ ", size=9.5, color=VOLT, spc=80),
-      ("a single tap runs the zero-friction auto-inspect pipeline across every screen above; each screen is non-blocking, so an inspector can jump in at any stage. Voice guide + locale screen make the flow shop-floor friendly.", {'size': 9.8, 'color': LIGHT})]], lsp=1.1, sp_after=0)
+    [[K("AUTOPILOT ▸ ", size=9.5, color=VOLT, spc=80),
+      ("a single tap runs the zero-friction auto-inspect pipeline across every screen above; each screen is non-blocking, so an inspector can jump in at any stage. Voice guide + locale screen make the flow shop-floor friendly.", {'size': 9.8, 'color': BODYTX})]], lsp=1.1, sp_after=0)
 
 def stage_slide(kick, title, obj, happens, funcs, out, ph1, ph2, cap1, cap2, tag):
     s = slide(); header(s, kick, title)
     chip(s, 0.5, 2.05, 1.6, "Objective")
-    txt(s, 0.5, 2.46, 7.5, 0.6, [[(obj, {'size': 12, 'color': LIME, 'bold': True})]], lsp=1.05)
+    txt(s, 0.5, 2.46, 7.5, 0.6, [[(obj, {'size': 12, 'color': ACC_DK, 'bold': True})]], lsp=1.05)
     chip(s, 0.5, 3.12, 2.0, "What happens")
-    txt(s, 0.5, 3.53, 7.5, 1.1, [[(happens, {'size': 11.6, 'color': LIGHT})]], lsp=1.08)
+    txt(s, 0.5, 3.53, 7.5, 1.1, [[(happens, {'size': 11.6, 'color': BODYTX})]], lsp=1.08)
     chip(s, 0.5, 4.68, 1.9, "Key functions")
     bullets(s, 0.5, 5.08, 7.5, funcs, size=11.2, gap=4)
-    chip(s, 0.5, 6.5, 1.35, "Output", fill=CARD_ACT, line=SAFE, tcolor=SAFE)
-    txt(s, 2.0, 6.55, 6.2, 0.5, [[(out, {'size': 11, 'color': LIGHT})]], lsp=1.0)
+    chip(s, 0.5, 6.5, 1.35, "Output", fill=SAFE_BG, line=SAFE, tcolor=SAFE)
+    txt(s, 2.0, 6.55, 6.2, 0.5, [[(out, {'size': 11, 'color': BODYTX})]], lsp=1.0)
     phone(s, ph1, 8.45, 2.0, 3.4, cap1)
     phone(s, ph2, 10.8, 2.0, 3.4, cap2)
-    chamfer(s, 8.45, 5.95, 4.42, 0.85, cut=0.12, fill=DEEP, line=TEAL)
-    txt(s, 8.65, 6.06, 4.05, 0.65, [[M(tag[0] + "  ", size=9.3, color=TEAL, spc=80), (tag[1], {'size': 9.3, 'color': LIGHT})]], lsp=1.05, sp_after=0)
+    chamfer(s, 8.45, 5.95, 4.42, 0.85, cut=0.12, fill=SURF, line=BORDER)
+    txt(s, 8.65, 6.06, 4.05, 0.65, [[K(tag[0] + "  ", size=9.3, spc=80), (tag[1], {'size': 9.3, 'color': BODYTX})]], lsp=1.05, sp_after=0)
     return s
 
-# 12 · STEP 1
 stage_slide("11 · HOW IT WORKS — STEP 1/5", "STEP 1 · CAPTURE & GEOMETRY SOLVE",
     "Digitise the physical workpiece into a metric-accurate digital twin using only the camera.",
     "Live video frames are processed on-device: edge detection proposes the plate boundary while four draggable corner pins (P1–P4) let the inspector snap the quad exactly. A perspective solve converts pixel quad → aspect ratio + surface area in mm², and the ambient noise floor is sampled so later acoustic readings can be trusted.",
-    ["Initialise camera stream & hardware health check (setup screen).",
+    ["Hardware health check + ambient noise floor (setup screen).",
      "Optical edge detection + draggable P1–P4 boundary pins.",
      "Perspective quad solve → aspect ratio & area in mm².",
-     "Ambient acoustic noise-floor sampling for SNR gating."],
+     "SCANNED QUAD AR badge confirms lock for downstream stages."],
     "Metric digital twin (quad + mm²) + noise-floor baseline.",
-    os.path.join(UI, "01_Setup_and_Calibration.png"), os.path.join(UI, "03_Target_setup.png"),
-    "01 · SETUP & CALIBRATION", "03 · TARGET SETUP",
+    "setup", "scan", "1. SETUP & CALIBRATION", "2. SCAN — TARGET SETUP",
     ("HOOK ▸", "useBoundaryDetection.ts — optical frame processor, pin drag state, mm² solve."))
 
-# 13 · STEP 2
-stage_slide("12 · HOW IT WORKS — STEP 2/5", "STEP 2 · CALIBRATION & RESONANCE LOCK",
-    "Find and lock the workpiece's true resonance with the microphone — no impedance head, no shaker rig.",
-    "The loudspeaker (or built-in speaker) sweeps the plate while the microphone stream feeds an autocorrelation pitch detector. The hook quantises the detected pitch to musical notes (F#5, A4 …), estimates Q / loss-factor damping and declares a resonance lock when the reading stabilises — the calibration gate for everything downstream.",
-    ["Hardware + ambient calibration with pass/fail gates.",
-     "Autocorrelation pitch detection on live mic stream.",
+stage_slide("12 · HOW IT WORKS — STEP 2/5", "STEP 2 · MATERIAL PROFILE & EXCITATION",
+    "Bind real material constants to the twin and excite the plate — the viewport becomes virtual sand.",
+    "The material screen loads FR4 / Al-6061 / steel / acrylic constants (E, ρ, ν, yield, loss factor, Basquin σf′ & b). The Live AR viewport then computes Kirchhoff–Love eigen-frequencies for the scanned quad, and one tap on ‘Excite Mode & Migrate Chladni Sand’ runs the WebGPU compute shader: 32,768 particles migrate onto nodal lines over the camera-perspective quad, with LDV-style heatmap, mode chips and 2D/3D/AR view toggles.",
+    ["Material library with real elastic + fatigue constants.",
+     "Eigen-frequency solve for scanned aspect ratio (376/616/1502 Hz…).",
+     "WebGPU particle migration onto nodal lines (virtual sand).",
+     "Tone / Mic-React / AR / 3D / 2D interaction modes."],
+    "Excited modal field rendered live over the real board.",
+    "material", "viewport", "3. MATERIAL", "4. LIVE AR — KIRCHHOFF-LOVE FEA",
+    ("HOOK ▸", "useChladniShader.ts — WebGPU compute/render, 64×64 W/∇W LUT, O(1) frames."))
+
+stage_slide("13 · HOW IT WORKS — STEP 3/5", "STEP 3 · RESONANCE LOCK & MODE GALLERY",
+    "Lock the true resonance with the microphone and catalogue every harmonic eigenmode.",
+    "The Note screen runs an autocorrelation pitch detector over the mic stream, quantises to musical notes (F#5, A4 …) with cents readout and declares resonance lock with a Q / damping estimate. The Shapes screen then galleries all (m, n) eigenmodes with eigen-frequency, Q and resonance gain, and compares baseline vs live patterns against the ±1.00 % tolerance.",
+    ["Autocorrelation pitch detection on live mic stream.",
      "Note quantisation & cents readout (e.g. F#5, A4).",
-     "Resonance lock + Q-factor / damping estimate."],
-    "Locked excitation frequency f₀ (0.01 Hz readout) + Q.",
-    os.path.join(UI, "04_Calibration.png"), os.path.join(UI, "06_Pitch_Detector.png"),
-    "04 · CALIBRATION", "06 · PITCH DETECTOR",
+     "Resonance lock + Q-factor / damping estimate.",
+     "Eigenmode gallery: indices, f₀, Q, resonance gain, peak flag."],
+    "Locked f₀ (0.01 Hz readout) + full eigenmode catalogue.",
+    "tuner", "modes", "5. NOTE — PITCH DETECTOR", "6. SHAPES — EIGENMODE GALLERY",
     ("HOOK ▸", "useAudioPitch.ts — autocorrelation → note quantisation → resonance lock."))
 
-# 14 · STEP 3
-stage_slide("13 · HOW IT WORKS — STEP 3/5", "STEP 3 · LIVE GPU MODAL IMAGING",
-    "Render the Chladni nodal field in real time — 'virtual sand' with zero physical setup.",
-    "A WebGPU compute pipeline drives 32,768 particles through a 64×64 amplitude/gradient lookup table of the Kirchhoff–Love (m, n) mode equation, so per-frame cost is O(1) with no trigonometry in the shader loop. Particles migrate to nodal lines exactly like sand; the gallery lists every harmonic eigenmode with its eigen-frequency, Q and resonance gain, and baseline-vs-live pattern comparison flags shifted modes.",
-    ["WGSL compute + render pipeline, 32,768 GPU particles.",
-     "64×64 W(x,y)/∇W LUT — O(1) updates, zero trig per frame.",
-     "Harmonic eigenmode gallery: f(m,n), Q, resonance gain.",
-     "Baseline vs live pattern comparison with ±1 % tolerance."],
-    "Live nodal-field viewport + eigenmode gallery + shift table.",
-    os.path.join(UI, "05_Live_resonance.png"), os.path.join(UI, "07_Vibration_Patterns.png"),
-    "05 · LIVE RESONANCE", "07 · VIBRATION PATTERNS",
-    ("HOOK ▸", "useChladniShader.ts — WebGPU compute/render, LUT-driven particle dynamics."))
+stage_slide("14 · HOW IT WORKS — STEP 4/5", "STEP 4 · SAFETY PLANNING & STRESS MAPPING",
+    "Turn modal images into engineering evidence: mounting safety and stress hotspots.",
+    "The Safety screen lets components be dragged over the nodal map and scores nodal-line clearance before mounting. The Stress screen converts locked modes + material constants into a dynamic von Mises heatmap with safe / moderate / extreme zones and Basquin fatigue life readouts, so reviewers see where energy concentrates — not just pretty patterns.",
+    ["Component drag-and-drop nodal-clearance safety check.",
+     "Dynamic von Mises heatmap with zone classification.",
+     "Basquin fatigue life + loss-factor damping readouts.",
+     "Hotspot localisation feeding the defect stage."],
+    "Safety plan + stress heatmap with quantified zones.",
+    "safety", "stress", "7. SAFETY — PLACEMENT CHECK", "8. STRESS — VON MISES HEATMAP",
+    ("PHYSICS ▸", "utils/physics.ts — Kirchhoff–Love, von Mises, Basquin, Q/η damping."))
 
-# 15 · STEP 4
-stage_slide("14 · HOW IT WORKS — STEP 4/5", "STEP 4 · STRESS & DEFECT INFERENCE",
-    "Convert modal images into engineering evidence: stress hotspots and subsurface anomaly calls.",
-    "Analytical von Mises stress and Basquin fatigue maths turn the locked modes and material constants into a dynamic stress heatmap with safe / moderate / extreme zones. In parallel the FastAPI microservice runs the Audio Spectrogram Transformer over the tap/sweep recording and the physics-informed modal surrogate (with virtual standoff clamping) over the geometry; baseline-vs-live modal shifts beyond ±1.00 % raise a REVIEW-NEEDED defect call with hotspot localisation.",
-    ["Dynamic von Mises heatmap + safe/moderate/extreme zones.",
-     "AST acoustic anomaly features (FastAPI + PyTorch).",
-     "ModalPINNSurrogate with Gaussian standoff clamping.",
-     "Component drag-and-drop nodal-clearance safety check."],
-    "Stress map + anomaly score + hotspot-tagged defect call.",
-    os.path.join(UI, "08_Defect_review.png"), os.path.join(UI, "07_Vibration_Patterns.png"),
-    "08 · DEFECT REVIEW", "07 · PATTERN COMPARISON",
+stage_slide("15 · HOW IT WORKS — STEP 5/5", "STEP 5 · DEFECT CALL, REPORT & AUDIT LOG",
+    "Close the loop with an anomaly call and traceable, audit-grade artefacts.",
+    "The Defects screen fuses baseline-vs-live modal shift, AST acoustic anomaly features and the PINN surrogate into a defect likelihood call with hotspot tags — explicitly an indication for review, never an over-claim. The session bundle (quad, material, modes, shift table, stress zones, calls) exports as DXF vector + PDF report and persists to Supabase (profiles, workpiece_scans, inspection_sessions) under row-level security.",
+    ["±1.00 % shift rule + AST anomaly score fusion.",
+     "DXF vector export of nodal lines & hotspot quads.",
+     "PDF audit report with tolerances & disclaimers.",
+     "RLS-secured inspection log with revisit & compare."],
+    "Defect call + DXF/PDF artefacts + RLS inspection log row.",
+    "defects", "export", "9. DEFECTS — ANOMALY CALLER", "10. EXPORT — REPORT & LOG",
     ("AI ▸", "DINOv2-small seg · MIT AST · ModalPINNSurrogate — lazy-loaded, CPU/GPU auto."))
 
-# 16 · STEP 5
-stage_slide("15 · HOW IT WORKS — STEP 5/5", "STEP 5 · REPORT, EXPORT & AUDIT LOG",
-    "Close the loop with traceable, audit-grade artefacts instead of screenshots.",
-    "The session bundle — geometry quad, material, locked modes, shift table, stress zones and defect calls — is serialised into a DXF vector nodal map for CAD review and a paginated PDF inspection report. The same bundle is persisted to Supabase (profiles, workpiece_scans, inspection_sessions) under row-level security, giving every inspection an immutable, owner-scoped history entry.",
-    ["DXF vector export of nodal lines & hotspot quads.",
-     "PDF audit report with tolerances & disclaimers.",
-     "Supabase RLS insert: scan + session + owner scope.",
-     "Inspection log with revisit & compare actions."],
-    "DXF + PDF artefacts and an RLS-secured inspection log row.",
-    os.path.join(UI, "09_Inspection_report.png"), os.path.join(UI, "10_Inspection_log.png"),
-    "09 · INSPECTION REPORT", "10 · INSPECTION LOG",
-    ("DATA ▸", "migration 20261103000000 — profiles, workpiece_scans, inspection_sessions + RLS."))
-
-# ================================================================ 17 · UI GALLERY
-s = slide(); header(s, "16 · PRODUCT", "REAL UI MOCKUP SCREENS (FIGMA → IMPLEMENTED)")
-gal = ["01_Setup_and_Calibration", "02_New_inspection", "05_Live_resonance", "07_Vibration_Patterns", "08_Defect_review", "09_Inspection_report"]
-caps = ["SETUP & CALIB", "NEW INSPECTION", "LIVE RESONANCE", "VIBRATION PATTERNS", "DEFECT REVIEW", "INSPECTION REPORT"]
-for i, (g, c) in enumerate(zip(gal, caps)):
-    x = 0.5 + i * 2.08
-    phone(s, os.path.join(UI, g + ".png"), x, 2.05, 4.35, c)
-txt(s, 0.5, 6.80, 12.3, 0.4,
-    [[M("DESIGN SYSTEM ▸ ", size=9.5, color=TEAL, spc=80),
-      ("tokens extracted from the Figma SVGs — canvas #0D191C, CTA teal #0EB29A, resonance lime #DDF0C2; chamfered cards & mono HUD readouts (this deck reuses them).", {'size': 9.5, 'color': MUTED})]], sp_after=0)
+# ================================================================ 17 · UI GALLERY (all 12 real screens)
+s = slide(); header(s, "16 · PRODUCT", "REAL UI — ALL 12 IMPLEMENTED SCREENS (LIVE BUILD)")
+gal = [("language", "1 · LOCALE"), ("auth", "AUTH / OAUTH"), ("setup", "1 · SETUP"), ("scan", "2 · SCAN"),
+       ("material", "3 · MATERIAL"), ("viewport", "4 · LIVE AR"), ("tuner", "5 · NOTE"), ("modes", "6 · SHAPES"),
+       ("safety", "7 · SAFETY"), ("stress", "8 · STRESS"), ("defects", "9 · DEFECTS"), ("export", "10 · EXPORT")]
+for i, (g, c) in enumerate(gal):
+    row, col = divmod(i, 6)
+    x = 2.49 + col * 1.4587
+    y = 1.95 + row * 2.47
+    phone(s, g, x, y, 2.30, c)
+txt(s, 0.5, 6.90, 12.3, 0.2,
+    [[K("DESIGN SYSTEM ▸ ", size=9.5, spc=80),
+      ("light engineering palette — bg #F8FAFC, cards #FFFFFF, sky accent #0284C7, chamfer clips, AR grid; dark mode ships as a toggle (this deck reuses the same tokens).", {'size': 9.5, 'color': MUTED})]], sp_after=0)
 
 # ================================================================ 18 · NOVELTY
 s = slide(); header(s, "17 · NOVELTY", "NOVELTY & INNOVATION")
@@ -705,12 +646,12 @@ nov = [
 for i, (code, t, d) in enumerate(nov):
     x = 0.5 + (i % 2) * 6.25
     y = 2.05 + (i // 2) * 1.62
-    chamfer(s, x, y, 6.05, 1.45, cut=0.14, fill=CARD if i % 2 == 0 else DEEP, line=STROKE)
-    rect(s, x, y, 0.09, 1.45, fill=VOLT if i % 3 == 0 else TEAL)
-    txt(s, x + 0.25, y + 0.12, 1.0, 0.3, [[M(code, size=11, color=TEAL, spc=120)]], sp_after=0)
-    txt(s, x + 0.95, y + 0.13, 4.95, 0.32, [[(t, {'size': 11.5, 'bold': True, 'color': LIME, 'spc': 20})]], sp_after=0)
-    txt(s, x + 0.25, y + 0.52, 5.6, 0.85, [[(d, {'size': 10.2, 'color': LIGHT})]], lsp=1.06, sp_after=0)
-txt(s, 0.5, 6.82, 12.3, 0.35, [[M("POSITIONING ▸ ", size=9.5, color=VOLT, spc=80),
+    chamfer(s, x, y, 6.05, 1.45, cut=0.14, fill=CARD if i % 2 == 0 else SURF, line=BORDER)
+    rect(s, x, y, 0.09, 1.45, fill=VOLT if i % 3 == 0 else ACC)
+    txt(s, x + 0.25, y + 0.12, 1.0, 0.3, [[K(code, size=11, spc=120)]], sp_after=0)
+    txt(s, x + 0.95, y + 0.13, 4.95, 0.32, [[(t, {'size': 11.5, 'bold': True, 'color': NAVY, 'spc': 20})]], sp_after=0)
+    txt(s, x + 0.25, y + 0.52, 5.6, 0.85, [[(d, {'size': 10.2, 'color': BODYTX})]], lsp=1.06, sp_after=0)
+txt(s, 0.5, 6.82, 12.3, 0.35, [[K("POSITIONING ▸ ", size=9.5, color=VOLT, spc=80),
     ("prior Chladni/CV research = offline photo classification; prior PINN work = offline surrogates. HARMONIX-AR is the first real-time, instrument-free, browser-delivered fusion of both.", {'size': 9.5, 'color': MUTED})]], sp_after=0)
 
 # ================================================================ 19 · RESULTS
@@ -725,32 +666,15 @@ res = [
     ("AI microservice", "DINOv2-small segmentation, AST AudioSet embeddings, PINN surrogate w/ standoff clamp; CPU/GPU auto"),
     ("Delivery & audit", "Vercel + Supabase RLS sessions; DXF vector + PDF report export; offline browser fallback verified"),
 ]
-ts = s.shapes.add_table(len(res), 2, Inches(0.5), Inches(2.02), Inches(7.6), Inches(4.35))
-t3 = ts.table
-t3.first_row = False; t3.horz_banding = False
-t3.columns[0].width = Inches(1.95); t3.columns[1].width = Inches(5.65)
-for ri, row in enumerate(res):
-    t3.rows[ri].height = Inches(0.34 if ri == 0 else 0.56)
-    for ci, val in enumerate(row):
-        cell = t3.cell(ri, ci)
-        cell.margin_left = Inches(0.08); cell.margin_right = Inches(0.06)
-        cell.margin_top = Inches(0.02); cell.margin_bottom = Inches(0.02)
-        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
-        cell.fill.solid(); cell.fill.fore_color.rgb = C(ITEM if ri == 0 else (CARD if ri % 2 else DEEP))
-        p = cell.text_frame.paragraphs[0]
-        r = p.add_run(); r.text = val
-        r.font.size = Pt(9.6 if ri == 0 else 8.9)
-        r.font.bold = (ri == 0 or ci == 0)
-        r.font.name = MONO if (ri == 0 or ci == 0) else BODY
-        r.font.color.rgb = C(LIME if ri == 0 else (TEAL if ci == 0 else LIGHT))
+table(s, res, 0.5, 2.02, 7.6, [1.95, 5.65], rowh=0.56, headh=0.34, fs=8.9)
 chip(s, 0.5, 6.5, 2.5, "Performance analysis")
-txt(s, 3.15, 6.53, 5.0, 0.6, [[("Real-time interactive loop (no batch queue), zero dedicated hardware, 1-tap autopilot, traceable records.", {'size': 10.2, 'color': LIGHT})]], lsp=1.0)
-img_fit(s, os.path.join(IMG, "chladni-plate-vibration-resonance-sand-p-2.jpg"), 8.45, 2.02, 4.4, 2.35)
-txt(s, 8.45, 4.4, 4.4, 0.35, [[M("PHYSICAL CHLADNI REFERENCE — WHAT WE VIRTUALISE", size=8.5, color=MUTED, spc=40)]], align=PP_ALIGN.CENTER, sp_after=0)
-chamfer(s, 8.45, 4.85, 4.4, 2.0, cut=0.14, fill=DEEP, line=SAFE, lw=1.2)
-txt(s, 8.68, 5.0, 3.95, 1.75,
-    [[M("ANALYSIS ▸ ", size=9.5, color=SAFE, spc=80)],
-     [("Modal shifts within ±1 % pass silently; beyond tolerance the system localises the hotspot and recommends a localised check — explicitly labelled as indication, not confirmation, of damage (honest NDT semantics).", {'size': 9.8, 'color': LIGHT})]], lsp=1.08, sp_after=4)
+txt(s, 3.15, 6.53, 5.0, 0.6, [[("Real-time interactive loop (no batch queue), zero dedicated hardware, 1-tap autopilot, traceable records.", {'size': 10.2, 'color': BODYTX})]], lsp=1.0)
+img_fit(s, os.path.join(IMG, "chladni-plate-vibration-resonance-sand-p-2.jpg"), 8.45, 2.02, 4.4, 2.3)
+txt(s, 8.45, 4.35, 4.4, 0.35, [[K("PHYSICAL CHLADNI REFERENCE — WHAT WE VIRTUALISE", size=8.5, color=MUTED, spc=40)]], align=PP_ALIGN.CENTER, sp_after=0)
+chamfer(s, 8.45, 4.82, 4.4, 2.0, cut=0.14, fill=SAFE_BG, line=SAFE, lw=1.2)
+txt(s, 8.68, 4.97, 3.95, 1.75,
+    [[K("ANALYSIS ▸ ", size=9.5, color=SAFE, spc=80)],
+     [("Modal shifts within ±1 % pass silently; beyond tolerance the system localises the hotspot and recommends a localised check — explicitly labelled as indication, not confirmation, of damage (honest NDT semantics).", {'size': 9.8, 'color': BODYTX})]], lsp=1.08, sp_after=4)
 
 # ================================================================ 20 · SE PROCESS
 s = slide(); header(s, "19 · ENGINEERING PROCESS", "SOFTWARE ENGINEERING PROCESS & QA")
@@ -769,8 +693,8 @@ bullets(s, 0.5, 5.78, 6.0, [
     "Security — OAuth 2.0, RLS policies, server-only service role key.",
     "Maintainability — token-driven UI kit (ChamferedCard, Hud*), typed DB schema.",
 ], size=11.4, gap=5)
-chamfer(s, 6.9, 2.05, 5.95, 4.8, cut=0.16, fill=CARD, line=STROKE)
-txt(s, 7.15, 2.25, 5.5, 0.3, [[M("REPOSITORY STRUCTURE", size=10.5, color=TEAL, spc=120)]], sp_after=0)
+chamfer(s, 6.9, 2.05, 5.95, 4.8, cut=0.16, fill=CARD, line=BORDER)
+txt(s, 7.15, 2.25, 5.5, 0.3, [[K("REPOSITORY STRUCTURE", size=10.5, spc=120)]], sp_after=0)
 repo = [
     "src/app/…            12 guided routes (language → export)",
     "src/hooks/           useAudioPitch · useBoundaryDetection ·",
@@ -783,7 +707,7 @@ repo = [
     "                     inspection_sessions + RLS policies",
     "public/assets/       Figma SVG mockups (design source)",
 ]
-txt(s, 7.15, 2.62, 5.55, 4.1, [[M(l, size=9.4, color=LIGHT if i % 3 != 2 else MUTED)] for i, l in enumerate(repo)], sp_after=3, lsp=1.0)
+txt(s, 7.15, 2.62, 5.55, 4.1, [[(l, {'size': 9.4, 'color': BODYTX if i % 3 != 2 else MUTED}) for i, l in enumerate(repo)][i:i+1] for i in range(0, len(repo), 1)], sp_after=3, lsp=1.0)
 
 # ================================================================ 21 · ADVANTAGES
 s = slide(); header(s, "20 · ADVANTAGES", "ADVANTAGES OF THE PROPOSED SYSTEM")
@@ -798,9 +722,9 @@ adv = [
     "Sustainable software engineering: token-driven UI, typed contracts, migration-first data.",
 ]
 bullets(s, 0.5, 2.15, 7.6, adv, size=12.6, gap=9)
-phone(s, os.path.join(UI, "10_Inspection_log.png"), 9.7, 1.95, 4.8, "TRACEABLE INSPECTION LOG")
-chamfer(s, 8.5, 2.6, 1.0, 3.2, cut=0.1, fill=DEEP, line=STROKE)
-txt(s, 8.58, 2.8, 0.85, 2.9, [[M("COST", size=9, color=SAFE, spc=60)], [M("↓↓", size=12, color=SAFE)], [M("TIME", size=9, color=SAFE, spc=60)], [M("↓↓", size=12, color=SAFE)], [M("RISK", size=9, color=SAFE, spc=60)], [M("↓", size=12, color=SAFE)]], sp_after=8)
+phone(s, "export", 9.7, 1.95, 4.8, "10. EXPORT — TRACEABLE REPORT")
+chamfer(s, 8.5, 2.6, 1.0, 3.2, cut=0.1, fill=SURF, line=BORDER)
+txt(s, 8.58, 2.8, 0.85, 2.9, [[K("COST", size=9, color=SAFE, spc=60)], [("↓↓", {'size': 12, 'color': SAFE, 'bold': True})], [K("TIME", size=9, color=SAFE, spc=60)], [("↓↓", {'size': 12, 'color': SAFE, 'bold': True})], [K("RISK", size=9, color=SAFE, spc=60)], [("↓", {'size': 12, 'color': SAFE, 'bold': True})]], sp_after=8)
 
 # ================================================================ 22 · CHALLENGES
 s = slide(); header(s, "21 · LIMITATIONS", "CHALLENGES / LIMITATIONS")
@@ -814,9 +738,9 @@ chal = [
 ]
 for i, (h, d) in enumerate(chal):
     y = 2.05 + i * 0.78
-    chamfer(s, 0.5, y, 8.1, 0.66, cut=0.12, fill=CARD if i % 2 == 0 else DEEP, line=STROKE)
-    txt(s, 0.72, y + 0.09, 7.7, 0.5, [[(h, {'size': 11, 'bold': True, 'color': WARN}), (d, {'size': 10.6, 'color': LIGHT})]], lsp=0.98, sp_after=0)
-chip(s, 8.9, 2.05, 2.4, "Possible improvements", fill=CARD_ACT, line=SAFE, tcolor=SAFE)
+    chamfer(s, 0.5, y, 8.1, 0.66, cut=0.12, fill=CARD if i % 2 == 0 else SURF, line=BORDER)
+    txt(s, 0.72, y + 0.09, 7.7, 0.5, [[(h, {'size': 11, 'bold': True, 'color': WARN}), (d, {'size': 10.6, 'color': BODYTX})]], lsp=0.98, sp_after=0)
+chip(s, 8.9, 2.05, 2.4, "Possible improvements", fill=SAFE_BG, line=SAFE, tcolor=SAFE)
 bullets(s, 8.9, 2.5, 3.95, [
     "Larger labelled defect dataset for calibrated anomaly thresholds.",
     "Multi-camera stereo for curved workpieces.",
@@ -836,15 +760,15 @@ fut = [
     "Certificate chain: signed PDF reports with verifier QR + ISO 9712 operator IDs.",
 ]
 bullets(s, 0.5, 2.15, 7.5, fut, size=12.4, gap=9)
-phone(s, os.path.join(UI, "09_Inspection_report.png"), 9.7, 2.0, 4.85, "REPORT → SIGNED CERTIFICATE CHAIN")
-chamfer(s, 8.5, 3.0, 1.0, 2.6, cut=0.1, fill=DEEP, line=STROKE)
-txt(s, 8.58, 3.2, 0.85, 2.3, [[M("v1", size=10, color=TEAL)], [M("shipped", size=8, color=MUTED)], [M("v2", size=10, color=TEAL)], [M("on-device", size=8, color=MUTED)], [M("v3", size=10, color=TEAL)], [M("fleet", size=8, color=MUTED)]], sp_after=6)
+phone(s, "export", 9.7, 2.0, 4.85, "REPORT → SIGNED CERTIFICATE CHAIN")
+chamfer(s, 8.5, 3.0, 1.0, 2.6, cut=0.1, fill=SURF, line=BORDER)
+txt(s, 8.58, 3.2, 0.85, 2.3, [[K("v1", size=10)], [("shipped", {'size': 8, 'color': MUTED})], [K("v2", size=10)], [("on-device", {'size': 8, 'color': MUTED})], [K("v3", size=10)], [("fleet", {'size': 8, 'color': MUTED})]], sp_after=6)
 
 # ================================================================ 24 · CONCLUSION
 s = slide(); header(s, "23 · CONCLUSION", "CONCLUSION")
 chip(s, 0.5, 2.05, 1.4, "Summary")
 txt(s, 0.5, 2.46, 7.6, 1.3,
-    [[("HARMONIX-AR fuses computer vision, audio DSP, GPU physics simulation and transformer AI into a single browser-delivered NDT workflow. It replaces the sand-plate rig and the vibrometer with a camera, a microphone and a compute shader — and closes the loop with audit-grade DXF/PDF/RLS records.", {'size': 12.4, 'color': LIGHT})]], lsp=1.1)
+    [[("HARMONIX-AR fuses computer vision, audio DSP, GPU physics simulation and transformer AI into a single browser-delivered NDT workflow. It replaces the sand-plate rig and the vibrometer with a camera, a microphone and a compute shader — and closes the loop with audit-grade DXF/PDF/RLS records.", {'size': 12.4, 'color': BODYTX})]], lsp=1.1)
 chip(s, 0.5, 3.95, 2.3, "Key achievements")
 bullets(s, 0.5, 4.38, 7.6, [
     "Real-time WebGPU Chladni imaging (32,768 particles) with eigenmode gallery.",
@@ -853,16 +777,16 @@ bullets(s, 0.5, 4.38, 7.6, [
     "12-screen guided flow with 1-tap autopilot, voice guide and locale support.",
     "Secure, traceable delivery: OAuth, RLS log, DXF/PDF export, offline fallback.",
 ], size=11.8, gap=6)
-chamfer(s, 8.45, 2.05, 4.4, 4.8, cut=0.16, fill=DEEP, line=TEAL)
+chamfer(s, 8.45, 2.05, 4.4, 4.8, cut=0.16, fill=CARD, line=ACC)
 s.shapes.add_picture(HXLOGO, Inches(10.25), Inches(2.35), height=Inches(1.0))
-txt(s, 8.7, 3.5, 3.9, 0.4, [[("HARMONIX-AR", {'size': 15, 'bold': True, 'color': LIGHT, 'spc': 160})]], align=PP_ALIGN.CENTER, sp_after=0)
-txt(s, 8.7, 3.86, 3.9, 0.3, [[M("ACOUSTIC RESONANCE & NDT INTELLIGENCE", size=8, color=MUTED, spc=100)]], align=PP_ALIGN.CENTER, sp_after=0)
+txt(s, 8.7, 3.5, 3.9, 0.4, [[("HARMONIX-AR", {'size': 15, 'bold': True, 'color': NAVY, 'spc': 160})]], align=PP_ALIGN.CENTER, sp_after=0)
+txt(s, 8.7, 3.86, 3.9, 0.3, [[K("ACOUSTIC RESONANCE & NDT INTELLIGENCE", size=8, color=MUTED, spc=100)]], align=PP_ALIGN.CENTER, sp_after=0)
 txt(s, 8.7, 4.35, 3.9, 2.3,
-    [[M("NOVELTY IN ONE LINE", size=9.5, color=VOLT, spc=100)],
-     [("The first real-time, instrument-free, browser-native Chladni resonance imager with physics-informed AI defect calling and audit-grade traceability.", {'size': 11, 'color': LIME})],
-     [M("", size=4)],
-     [M("NANDHEESA PRASAD K · 192511181", size=9, color=MUTED, spc=40)],
-     [M("GUIDE · Dr.Surendran R", size=9, color=MUTED, spc=40)]], sp_after=6, lsp=1.08)
+    [[K("NOVELTY IN ONE LINE", size=9.5, color=VOLT, spc=100)],
+     [("The first real-time, instrument-free, browser-native Chladni resonance imager with physics-informed AI defect calling and audit-grade traceability.", {'size': 11, 'color': ACC_DK})],
+     [(" ", {'size': 4})],
+     [("NANDHEESA PRASAD K · 192511181", {'size': 9, 'color': MUTED, 'spc': 40})],
+     [("GUIDE · Dr.Surendran R", {'size': 9, 'color': MUTED, 'spc': 40})]], sp_after=6, lsp=1.08)
 
 # ================================================================ 25 · REFERENCES
 s = slide(); header(s, "24 · REFERENCES", "REFERENCES")
@@ -886,30 +810,27 @@ for i, rtext in enumerate(refs):
     rowi = i % half
     x = 0.5 + col * 6.3
     y = 2.05 + rowi * 0.82
-    txt(s, x, y, 6.05, 0.8, [[(rtext, {'size': 9.3, 'color': LIGHT})]], lsp=1.02, sp_after=0)
+    txt(s, x, y, 6.05, 0.8, [[(rtext, {'size': 9.3, 'color': BODYTX})]], lsp=1.02, sp_after=0)
 
 # ================================================================ 26 · THANK YOU
 s = slide()
-glow(s, -1.8, -2.2, 7.0, TEAL, 8)
-glow(s, 8.8, 3.2, 6.4, VOLT, 6)
 s.shapes.add_picture(SE_LOGO, Inches(0.5), Inches(0.4), height=Inches(0.72))
 s.shapes.add_picture(SEAL, Inches(SW - 1.3), Inches(0.34), height=Inches(0.85))
 s.shapes.add_picture(HXLOGO, Inches(SW / 2 - 0.62), Inches(1.5), height=Inches(1.25))
-txt(s, 1.0, 3.0, SW - 2.0, 0.9, [[("THANK YOU", {'size': 44, 'bold': True, 'color': LIGHT, 'spc': 300})]], align=PP_ALIGN.CENTER, sp_after=0)
-rect(s, SW / 2 - 1.6, 3.85, 2.2, 0.045, fill=TEAL)
-rect(s, SW / 2 + 0.7, 3.85, 0.35, 0.045, fill=LIME)
-txt(s, 1.0, 4.1, SW - 2.0, 0.35, [[M("QUESTIONS & DISCUSSION", size=12, color=TEAL, spc=260)]], align=PP_ALIGN.CENTER, sp_after=0)
+txt(s, 1.0, 3.0, SW - 2.0, 0.9, [[("THANK YOU", {'size': 44, 'bold': True, 'color': NAVY, 'spc': 300})]], align=PP_ALIGN.CENTER, sp_after=0)
+rect(s, SW / 2 - 1.6, 3.85, 2.2, 0.05, fill=ACC)
+rect(s, SW / 2 + 0.7, 3.85, 0.35, 0.05, fill=VOLT)
+txt(s, 1.0, 4.1, SW - 2.0, 0.35, [[K("QUESTIONS & DISCUSSION", size=12, spc=260)]], align=PP_ALIGN.CENTER, sp_after=0)
 txt(s, 1.0, 4.75, SW - 2.0, 0.9,
-    [[("PRESENTED BY  ", {'size': 10.5, 'color': MUTED, 'font': MONO, 'spc': 80}), ("NANDHEESA PRASAD K · 192511181", {'size': 12, 'bold': True, 'color': LIGHT})],
-     [("UNDER THE SUPERVISION OF  ", {'size': 10.5, 'color': MUTED, 'font': MONO, 'spc': 80}), ("Dr.Surendran R", {'size': 12, 'bold': True, 'color': LIGHT})],
-     [("SOFTWARE ENGINEERING CAPSTONE · 2026", {'size': 10, 'color': MUTED, 'font': MONO, 'spc': 120})]],
+    [[("PRESENTED BY  ", {'size': 10.5, 'color': MUTED, 'spc': 80}), ("NANDHEESA PRASAD K · 192511181", {'size': 12, 'bold': True, 'color': NAVY})],
+     [("UNDER THE SUPERVISION OF  ", {'size': 10.5, 'color': MUTED, 'spc': 80}), ("Dr.Surendran R", {'size': 12, 'bold': True, 'color': NAVY})],
+     [("SOFTWARE ENGINEERING CAPSTONE · 2026", {'size': 10, 'color': MUTED, 'spc': 120})]],
     align=PP_ALIGN.CENTER, sp_after=6)
-txt(s, 1.0, 6.5, SW - 2.0, 0.3, [[M("HARMONIX // ACOUSTIC RESONANCE & NDT INTELLIGENCE", size=9, color=STROKE_HI, spc=200)]], align=PP_ALIGN.CENTER, sp_after=0)
+txt(s, 1.0, 6.5, SW - 2.0, 0.3, [[K("HARMONIX // ACOUSTIC RESONANCE & NDT INTELLIGENCE", size=9, color=BORDERHI, spc=200)]], align=PP_ALIGN.CENTER, sp_after=0)
 
-# ---------------- save ----------------
-prs.core_properties.title = "HARMONIX-AR — Software Engineering Capstone"
+prs.core_properties.title = "HARMONIX-AR — Software Engineering Capstone (v2, real UI)"
 prs.core_properties.author = "Nandheesa Prasad K (192511181)"
 prs.core_properties.subject = "Browser-native Chladni resonance imaging & AI-assisted NDT"
 out = os.path.join(ROOT, "..", "HARMONIX-AR_Capstone_Deck.pptx")
 prs.save(out)
-print("saved", out, "slides:", len(prs.slides.__iter__.__self__._sldIdLst))
+print("saved", out, "slides:", len(prs.slides._sldIdLst))
