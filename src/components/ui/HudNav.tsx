@@ -39,7 +39,7 @@ export const HudNav: React.FC = () => {
   }, [pathname]);
 
   // Do not show on onboarding/auth screens
-  if (pathname === "/language" || pathname === "/auth" || pathname === "/") {
+  if (pathname === "/language" || pathname === "/auth" || pathname === "/" || pathname === "/film") {
     return null;
   }
 

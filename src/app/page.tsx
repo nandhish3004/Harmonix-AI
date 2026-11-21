@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 export default function RootPage() {
-  // Onboarding sequence starts at Screen 00 (Language Selection)
-  redirect("/language");
+  // Present the film directly; the original app routes remain available separately.
+  redirect("/film");
 }
 

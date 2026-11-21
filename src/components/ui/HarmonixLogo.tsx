@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { ArrowRight } from "lucide-react";
+import { usePathname } from "next/navigation";
 
 const SPLASH_EVENT = "harmonix:replay-splash";
 const SPLASH_SESSION_KEY = "harmonix_intro_played_v4";
@@ -159,6 +160,7 @@ export const HarmonixLogo: React.FC<HarmonixLogoProps> = ({
  *   3. Swiss-industrial wide-tracked typography ("HARMONIX // ACOUSTIC RESONANCE & NDT INTELLIGENCE") rises cleanly.
  */
 export const HarmonixSplash: React.FC = () => {
+  const pathname = usePathname();
   const [visible, setVisible] = useState<boolean>(false);
   const [exiting, setExiting] = useState<boolean>(false);
   const [runKey, setRunKey] = useState<number>(0);
@@ -181,7 +183,7 @@ export const HarmonixSplash: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || pathname === "/film") return;
     const alreadyPlayed = window.sessionStorage.getItem(SPLASH_SESSION_KEY) === "1";
     if (!alreadyPlayed) {
       setVisible(true);
@@ -189,7 +191,7 @@ export const HarmonixSplash: React.FC = () => {
     const onReplay = () => startSplash();
     window.addEventListener(SPLASH_EVENT, onReplay);
     return () => window.removeEventListener(SPLASH_EVENT, onReplay);
-  }, [startSplash]);
+  }, [startSplash, pathname]);
 
   useEffect(() => {
     if (!visible) return;
@@ -199,7 +201,7 @@ export const HarmonixSplash: React.FC = () => {
     return () => clearTimeout(timer);
   }, [visible, runKey, closeSplash]);
 
-  if (!visible) return null;
+  if (!visible || pathname === "/film") return null;
 
   return (
     <div
