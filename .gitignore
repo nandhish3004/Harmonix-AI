@@ -29,3 +29,12 @@
 *.tsbuildinfo
 next-env.d.ts
 
+
+# Capstone deck scratch assets (rendered mockups, extracted refs, npm tools, venv)
+/ppt-work/ui
+/ppt-work/ref
+/ppt-work/logo
+/ppt-work/tools
+/.venv-ppt
+/image-search
+/ppt-work/shots
