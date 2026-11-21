@@ -1,20 +1,11 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono, Inter } from "next/font/google";
+import "@fontsource-variable/inter";
+import "@fontsource/jetbrains-mono";
 import "./globals.css";
 import { HudNav } from "@/components/ui/HudNav";
 import { HarmonixSplash } from "@/components/ui/HarmonixLogo";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AutopilotProvider } from "@/context/autopilot";
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-jetbrains-mono",
-});
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-geist-sans",
-});
 
 export const metadata: Metadata = {
   title: "HARMONIX-AR | Acoustic Chladni Resonance & NDT Inspection",
@@ -29,7 +20,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${jetbrainsMono.variable} ${inter.variable} min-h-screen bg-slate-50 dark:bg-[#0D191C] text-slate-900 dark:text-[#F5FDFF] flex justify-center transition-colors duration-200`}
+        className={`min-h-screen bg-slate-50 dark:bg-[#0D191C] text-slate-900 dark:text-[#F5FDFF] flex justify-center transition-colors duration-200`}
       >
         <ThemeProvider defaultTheme="light" attribute="class" enableSystem={false}>
           <HarmonixSplash />

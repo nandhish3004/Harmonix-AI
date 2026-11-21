@@ -3,6 +3,8 @@
 @tailwind utilities;
 
 :root {
+  --font-geist-sans: "Inter Variable", sans-serif;
+  --font-jetbrains-mono: "JetBrains Mono", monospace;
   --background: #F8FAFC;
   --foreground: #0F172A;
   --card-bg: #FFFFFF;

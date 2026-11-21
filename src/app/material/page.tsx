@@ -198,7 +198,7 @@ export default function MaterialSelectionPage() {
           <Sparkles className="w-4 h-4 text-sky-600 shrink-0" />
           <span>
             <b>AI pick:</b> {aiReason ?? "analysing your scan…"} Tap another card to override.
-            {area ? ` (Scanned area ≈ ${Math.round(area / 100) / 10} cm²)` : ""}
+            {area ? ` (Scanned area ≈ ${Math.round(area / 10) / 10} cm²)` : ""}
           </span>
         </div>
 
