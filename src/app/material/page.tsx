@@ -2,9 +2,12 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ArrowRight, Sparkles, Cpu, Box, Shield, Layers } from "lucide-react";
+import { Check, ArrowRight, Cpu, Box, Shield, Layers } from "lucide-react";
+import { Banner } from "@astryxdesign/core/Banner";
+import { ProgressBar } from "@astryxdesign/core/ProgressBar";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { SelectableCard } from "@astryxdesign/core/SelectableCard";
 import { HudHeader } from "@/components/ui/HudHeader";
-import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { MATERIAL_CONSTANTS, MaterialData } from "@/utils/physics";
 import { useAutoAdvance } from "@/context/autopilot";
@@ -81,22 +84,14 @@ const THICKNESS_PRESETS = [
   { mm: 5.0, label: "Very thick", sub: "5.0 mm" },
 ];
 
-function Meter({ label, value, from, to }: { label: string; value: number; from: string; to: string }) {
+function Meter({ label, value, variant = "accent" }: { label: string; value: number; variant?: "accent" | "warning" }) {
   return (
-    <div>
-      <div className="flex justify-between text-[10px] font-semibold text-slate-500 dark:text-[#8C999A] mb-0.5">
-        <span>{label}</span>
-      </div>
-      <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-[#233A3D] overflow-hidden">
-        <div
-          className="h-full rounded-full"
-          style={{
-            width: `${Math.max(6, Math.min(100, value * 100))}%`,
-            background: `linear-gradient(90deg, ${from}, ${to})`,
-          }}
-        />
-      </div>
-    </div>
+    <ProgressBar
+      label={label}
+      value={Math.max(6, Math.min(100, Math.round(value * 100)))}
+      max={100}
+      variant={variant}
+    />
   );
 }
 
@@ -193,30 +188,30 @@ export default function MaterialSelectionPage() {
       <HudHeader title="Pick Material" step="SCREEN 03 // 10" backHref="/scan" />
 
       <div className="p-4 space-y-4 flex-1">
-        {/* AI recommendation */}
-        <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl brand-gradient-soft border border-sky-200 dark:border-[#0EB29A]/40 text-[12px] font-semibold text-sky-900 dark:text-[#F5FDFF]">
-          <Sparkles className="w-4 h-4 text-sky-600 shrink-0" />
-          <span>
-            <b>AI pick:</b> {aiReason ?? "analysing your scan…"} Tap another card to override.
-            {area ? ` (Scanned area ≈ ${Math.round(area / 100) / 10} cm²)` : ""}
-          </span>
-        </div>
+        {/* AI recommendation (Astryx Banner) */}
+        <Banner
+          status="info"
+          title="AI Material Recommendation"
+          description={`${aiReason ?? "Analysing your scan…"} Tap another card to override.${
+            area ? ` (Scanned area ≈ ${Math.round(area / 100) / 10} cm²)` : ""
+          }`}
+        />
 
         <div className="grid grid-cols-2 gap-3">
           {MATERIALS.map((mat) => {
             const isSelected = selectedMaterialId === mat.id;
             const MatIcon = mat.Icon;
             return (
-              <button
+              <SelectableCard
                 key={mat.id}
-                type="button"
-                onClick={() => setSelectedMaterialId(mat.id)}
-                className="text-left focus:outline-none active:scale-[0.97] transition-transform"
+                label={mat.name}
+                isSelected={isSelected}
+                onChange={() => setSelectedMaterialId(mat.id)}
+                elevation={isSelected ? "low" : "none"}
+                padding={3}
+                width="100%"
               >
-                <ChamferedCard
-                  variant={isSelected ? "active" : "default"}
-                  className="p-3.5 h-full flex flex-col gap-2"
-                >
+                <div className="flex flex-col gap-2.5 w-full h-full">
                   <div className="flex items-start justify-between">
                     <span className="w-10 h-10 rounded-2xl bg-sky-50 dark:bg-[#1C332E] border border-sky-200 dark:border-[#0EB29A]/40 text-sky-600 dark:text-[#0EB29A] flex items-center justify-center">
                       <MatIcon className="w-5 h-5" />
@@ -226,47 +221,39 @@ export default function MaterialSelectionPage() {
                         <Check className="w-3.5 h-3.5 stroke-[3]" />
                       </span>
                     ) : (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-[#233A3D] text-slate-500 dark:text-[#8C999A]">
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-[#233A3D] text-slate-600 dark:text-[#8C999A]">
                         {mat.tag}
                       </span>
                     )}
                   </div>
                   <div>
-                    <h3 className="text-sm font-extrabold leading-tight">{mat.name}</h3>
-                    <p className="text-[11px] text-slate-500 dark:text-[#8C999A] leading-snug mt-0.5">{mat.plain}</p>
+                    <h3 className="text-sm font-extrabold leading-tight text-slate-900 dark:text-[#F5FDFF]">{mat.name}</h3>
+                    <p className="text-xs text-slate-500 dark:text-[#8C999A] leading-snug mt-0.5">{mat.plain}</p>
                   </div>
                   <div className="space-y-1.5 mt-auto pt-1">
-                    <Meter label="Stiffness" value={mat.youngsModulusGpa / 200} from="#22D3EE" to="#0284C7" />
-                    <Meter label="Weight" value={mat.densityKgM3 / 7850} from="#FBBF24" to="#F59E0B" />
+                    <Meter label="Stiffness" value={mat.youngsModulusGpa / 200} variant="accent" />
+                    <Meter label="Weight" value={mat.densityKgM3 / 7850} variant="warning" />
                   </div>
-                </ChamferedCard>
-              </button>
+                </div>
+              </SelectableCard>
             );
           })}
         </div>
 
-        {/* Thickness chips */}
-        <div>
-          <span className="text-sm font-extrabold block mb-2">How thick is it?</span>
-          <div className="grid grid-cols-4 gap-2">
-            {THICKNESS_PRESETS.map((t) => {
-              const on = thicknessMm === t.mm;
-              return (
-                <button
-                  key={t.mm}
-                  onClick={() => setThicknessMm(t.mm)}
-                  className={`rounded-2xl py-2.5 px-1 text-center border-2 transition-all active:scale-95 ${
-                    on
-                      ? "brand-gradient text-white border-transparent shadow-md shadow-sky-400/40"
-                      : "bg-white dark:bg-[#15282C] border-slate-200 dark:border-[#294044] text-slate-700 dark:text-[#F5FDFF]"
-                  }`}
-                >
-                  <span className="block text-xs font-extrabold">{t.label}</span>
-                  <span className={`block text-[10px] ${on ? "text-white/90" : "text-slate-500"}`}>{t.sub}</span>
-                </button>
-              );
-            })}
-          </div>
+        {/* Thickness selector (Astryx SegmentedControl) */}
+        <div className="space-y-2">
+          <span className="text-sm font-extrabold block text-slate-900 dark:text-[#F5FDFF]">Plate Thickness</span>
+          <SegmentedControl
+            label="Plate thickness"
+            value={String(thicknessMm)}
+            onChange={(val: string) => setThicknessMm(Number(val))}
+            layout="fill"
+            size="md"
+          >
+            {THICKNESS_PRESETS.map((t) => (
+              <SegmentedControlItem key={t.mm} value={String(t.mm)} label={t.sub} />
+            ))}
+          </SegmentedControl>
         </div>
 
         <div className="pt-2">

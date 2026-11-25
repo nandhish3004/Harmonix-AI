@@ -2,9 +2,11 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Lock, Mail, ArrowRight, KeyRound, User } from "lucide-react";
+import { Mail, KeyRound, User } from "lucide-react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
@@ -142,45 +144,28 @@ export default function AuthPage() {
         </div>
 
         <div>
-          <h1 className="text-2xl font-bold font-mono tracking-tight text-slate-900 dark:text-[#F5FDFF]">
-            HARMONIX-AR ACCESS
+          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-[#F5FDFF]">
+            Sign in to HARMONIX-AR
           </h1>
-          <p className="text-xs font-mono text-slate-600 dark:text-[#8C999A] mt-1">
-            Authenticate to sync workpiece point-clouds, vibration scans, and defect logs.
+          <p className="text-sm text-slate-600 dark:text-[#8C999A] mt-1 leading-relaxed">
+            Sync your workpiece scans, vibration profiles, and defect logs across devices.
           </p>
         </div>
 
-        {/* Tab Switcher: [SIGN IN] | [REGISTER] */}
-        <div className="bg-slate-200/80 dark:bg-[#101F23] p-1 rounded-[12px] border border-slate-200 dark:border-[#294044] grid grid-cols-2 gap-1">
-          <button
-            type="button"
-            onClick={() => {
-              setTab("signin");
-              setErrorMsg(null);
-            }}
-            className={`py-2 text-xs font-mono font-bold uppercase rounded-[10px] transition-all ${
-              tab === "signin"
-                ? "bg-white text-slate-900 shadow-sm dark:bg-[#0EB29A] dark:text-[#0D191C] dark:shadow-[0_0_12px_rgba(14,178,154,0.3)]"
-                : "text-slate-600 dark:text-[#8C999A] hover:text-slate-900 dark:hover:text-[#F5FDFF]"
-            }`}
-          >
-            SIGN IN
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setTab("register");
-              setErrorMsg(null);
-            }}
-            className={`py-2 text-xs font-mono font-bold uppercase rounded-[10px] transition-all ${
-              tab === "register"
-                ? "bg-white text-slate-900 shadow-sm dark:bg-[#0EB29A] dark:text-[#0D191C] dark:shadow-[0_0_12px_rgba(14,178,154,0.3)]"
-                : "text-slate-600 dark:text-[#8C999A] hover:text-slate-900 dark:hover:text-[#F5FDFF]"
-            }`}
-          >
-            REGISTER
-          </button>
-        </div>
+        {/* Astryx SegmentedControl: Sign In | Register */}
+        <SegmentedControl
+          label="Authentication mode"
+          value={tab}
+          onChange={(val: string) => {
+            setTab(val as "signin" | "register");
+            setErrorMsg(null);
+          }}
+          layout="fill"
+          size="md"
+        >
+          <SegmentedControlItem value="signin" label="Sign In" />
+          <SegmentedControlItem value="register" label="Create Account" />
+        </SegmentedControl>
 
         {/* Google Enterprise OAuth Trigger */}
         <Button
@@ -243,73 +228,48 @@ export default function AuthPage() {
           />
         )}
 
-        {/* Email & Password Form */}
+        {/* Email & Password Form (Astryx TextInput size="lg") */}
         <form onSubmit={handleEmailAuth} className="space-y-4">
           {tab === "register" && (
-            <div className="space-y-1.5">
-              <label className="block text-[11px] font-mono tracking-wider text-slate-600 dark:text-[#8C999A] uppercase font-semibold">
-                OPERATOR FULL NAME
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 dark:text-[#8C999A]">
-                  <User className="w-4 h-4" />
-                </div>
-                <input
-                  type="text"
-                  required
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Dr. Helena Vance"
-                  className="w-full bg-white dark:bg-[#15282C] border border-slate-300 dark:border-[#294044] focus:border-sky-600 dark:focus:border-[#0EB29A] text-slate-900 dark:text-[#F5FDFF] placeholder-slate-400 dark:placeholder-[#8C999A]/50 rounded-[12px] pl-10 pr-4 py-3 font-mono text-xs focus:outline-none transition-colors shadow-xs"
-                />
-              </div>
-            </div>
+            <TextInput
+              type="text"
+              label="Full Name"
+              size="lg"
+              width="100%"
+              isRequired
+              hasClear
+              value={fullName}
+              onChange={(val: string) => setFullName(val)}
+              placeholder="Dr. Helena Vance"
+              startIcon={<User className="w-4 h-4" />}
+            />
           )}
 
-          <div className="space-y-1.5">
-            <label className="block text-[11px] font-mono tracking-wider text-slate-600 dark:text-[#8C999A] uppercase font-semibold">
-              WORK EMAIL
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 dark:text-[#8C999A]">
-                <Mail className="w-4 h-4" />
-              </div>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="operator@acoustics-lab.internal"
-                className="w-full bg-white dark:bg-[#15282C] border border-slate-300 dark:border-[#294044] focus:border-sky-600 dark:focus:border-[#0EB29A] text-slate-900 dark:text-[#F5FDFF] placeholder-slate-400 dark:placeholder-[#8C999A]/50 rounded-[12px] pl-10 pr-4 py-3 font-mono text-xs focus:outline-none transition-colors shadow-xs"
-              />
-            </div>
-          </div>
+          <TextInput
+            type="email"
+            label="Work Email"
+            size="lg"
+            width="100%"
+            isRequired
+            hasClear
+            value={email}
+            onChange={(val: string) => setEmail(val)}
+            placeholder="operator@acoustics-lab.internal"
+            startIcon={<Mail className="w-4 h-4" />}
+          />
 
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="block text-[11px] font-mono tracking-wider text-slate-600 dark:text-[#8C999A] uppercase font-semibold">
-                SECURITY CIPHER (PASSWORD)
-              </label>
-              {tab === "signin" && (
-                <span className="text-[10px] font-mono text-sky-600 dark:text-[#0EB29A] cursor-pointer hover:underline font-semibold">
-                  FORGOT CIPHER?
-                </span>
-              )}
-            </div>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 dark:text-[#8C999A]">
-                <KeyRound className="w-4 h-4" />
-              </div>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••"
-                className="w-full bg-white dark:bg-[#15282C] border border-slate-300 dark:border-[#294044] focus:border-sky-600 dark:focus:border-[#0EB29A] text-slate-900 dark:text-[#F5FDFF] placeholder-slate-400 dark:placeholder-[#8C999A]/50 rounded-[12px] pl-10 pr-4 py-3 font-mono text-xs focus:outline-none transition-colors shadow-xs"
-              />
-            </div>
-          </div>
+          <TextInput
+            type="password"
+            label="Password"
+            size="lg"
+            width="100%"
+            isRequired
+            description={tab === "signin" ? "Minimum 6 characters" : "Choose a password with at least 6 characters"}
+            value={password}
+            onChange={(val: string) => setPassword(val)}
+            placeholder="••••••••••••"
+            startIcon={<KeyRound className="w-4 h-4" />}
+          />
 
           <HudButton
             type="submit"
@@ -319,7 +279,7 @@ export default function AuthPage() {
             isLoading={isLoading}
             className="mt-2"
           >
-            <span>{tab === "signin" ? "AUTHENTICATE SESSION →" : "CREATE OPERATOR ACCOUNT →"}</span>
+            <span>{tab === "signin" ? "Sign In →" : "Create Account →"}</span>
           </HudButton>
         </form>
       </div>

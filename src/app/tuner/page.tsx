@@ -8,11 +8,11 @@ import {
   Volume2,
   VolumeX,
   CheckCircle2,
-  AlertTriangle,
   Sparkles,
   Radio,
   Activity,
 } from "lucide-react";
+import { Banner } from "@astryxdesign/core/Banner";
 import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
@@ -832,34 +832,34 @@ export default function FindItsNotePage() {
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="rounded-2xl bg-white/70 dark:bg-black/20 p-2.5">
-                <span className="text-[10px] text-slate-500 block">Natural Frequency f0</span>
+            <div className="grid grid-cols-2 gap-2.5 text-sm">
+              <div className="rounded-2xl bg-white/75 dark:bg-black/20 p-3">
+                <span className="text-xs text-slate-600 dark:text-[#8C999A] block">Natural Frequency f0</span>
                 <span className="text-lg font-extrabold">{resultHz} Hz</span>
               </div>
-              <div className="rounded-2xl bg-white/70 dark:bg-black/20 p-2.5">
-                <span className="text-[10px] text-slate-500 block">
+              <div className="rounded-2xl bg-white/75 dark:bg-black/20 p-3">
+                <span className="text-xs text-slate-600 dark:text-[#8C999A] block">
                   {resultQ ? "Quality Q / Damping ζ" : "Model"}
                 </span>
                 <span className="text-lg font-extrabold">
                   {resultQ ? `Q ${resultQ}` : "FEA Baseline"}
                 </span>
                 {resultQ && (
-                  <span className="text-[10px] font-mono text-slate-500 block">
+                  <span className="text-xs font-mono text-slate-600 dark:text-[#8C999A] block">
                     ζ = {(1 / (2 * resultQ)).toFixed(4)}
                   </span>
                 )}
               </div>
             </div>
             {tapHzList.length > 0 && repeatabilityPct !== null && (
-              <div className="text-[11px] font-mono text-emerald-800 dark:text-[#DDF0C2] bg-emerald-500/10 rounded-xl px-3 py-1.5">
+              <div className="text-xs font-mono text-emerald-800 dark:text-[#DDF0C2] bg-emerald-500/10 rounded-xl px-3 py-2">
                 Captured: {tapHzList.map((h) => `${h} Hz`).join(" · ")} — Confidence{" "}
                 <b>{repeatabilityPct}%</b>
               </div>
             )}
             {ringQuality && <p className="text-xs font-semibold">{ringQuality}</p>}
             {astLabel && (
-              <p className="text-[11px] text-slate-600 dark:text-[#8C999A]">
+              <p className="text-xs text-slate-600 dark:text-[#8C999A]">
                 Acoustic signature: <b>{astLabel}</b>
               </p>
             )}
@@ -875,12 +875,11 @@ export default function FindItsNotePage() {
         )}
 
         {phase === "failed" && (
-          <div className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300 px-1">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>
-              Tip: In a noisy room, click <b>Active Sonar Ping</b> above for an instant speaker-driven frequency response test.
-            </span>
-          </div>
+          <Banner
+            status="warning"
+            title="No Tap Impulse Detected"
+            description="In a noisy room, tap Active Sonar Ping above for an instant speaker-driven frequency response test."
+          />
         )}
 
         <div className="pt-1 mt-auto">
