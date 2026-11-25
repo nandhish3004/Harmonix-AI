@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Inter } from "next/font/google";
+import "./layers.css";
 import "./globals.css";
 import { HudNav } from "@/components/ui/HudNav";
 import { HarmonixSplash } from "@/components/ui/HarmonixLogo";

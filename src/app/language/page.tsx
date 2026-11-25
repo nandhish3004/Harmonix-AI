@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Globe, Check, Cpu, ArrowRight, Shield, Sparkles } from "lucide-react";
-import { ChamferedCard } from "@/components/ui/ChamferedCard";
+import { SelectableCard } from "@astryxdesign/core/SelectableCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
@@ -92,42 +92,38 @@ export default function LanguageSelectionPage() {
         </div>
 
         <div>
-          <div className="flex items-center gap-2 mb-2">
-            <Globe className="w-5 h-5 text-sky-600 dark:text-[#0EB29A]" />
-            <span className="text-xs font-mono tracking-widest text-slate-500 dark:text-[#8C999A] uppercase font-semibold">
-              LOCALIZATION PROTOCOL
+          <div className="flex items-center gap-2 mb-1.5">
+            <Globe className="w-4 h-4 text-sky-600 dark:text-[#0EB29A]" />
+            <span className="text-xs font-mono tracking-wider text-slate-500 dark:text-[#8C999A] uppercase font-semibold">
+              Step 0 • Language &amp; Region
             </span>
           </div>
-          <h1 className="text-2xl font-bold font-mono tracking-tight text-slate-900 dark:text-[#F5FDFF]">
-            SELECT SYSTEM LOCALE
+          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-[#F5FDFF]">
+            Choose Your Language
           </h1>
-          <p className="text-xs font-mono text-slate-600 dark:text-[#8C999A] mt-1">
-            Calibrate AR telemetry readouts, acoustic diagnostics, and export templates for your deployment region.
+          <p className="text-xs text-slate-600 dark:text-[#8C999A] mt-1 leading-relaxed">
+            Set your preferred language for telemetry readouts, voice guidance, and exported audit reports.
           </p>
         </div>
 
-        {/* 5 Selectable Language Pills */}
-        <div className="space-y-3 pt-2">
+        {/* 5 Selectable Language Cards (Astryx SelectableCard) */}
+        <div className="space-y-2.5 pt-1">
           {LANGUAGES.map((lang) => {
             const isSelected = selectedLang === lang.code;
             return (
-              <button
+              <SelectableCard
                 key={lang.code}
-                type="button"
-                onClick={() => setSelectedLang(lang.code)}
-                className="w-full text-left transition-all duration-200 focus:outline-none"
+                label={`${lang.name} (${lang.native})`}
+                isSelected={isSelected}
+                onChange={() => setSelectedLang(lang.code)}
+                elevation={isSelected ? "low" : "none"}
+                padding={3}
+                width="100%"
               >
-                <ChamferedCard
-                  variant={isSelected ? "active" : "default"}
-                  className={`p-4 flex items-center justify-between cursor-pointer border ${
-                    isSelected
-                      ? "border-sky-500 bg-sky-50/80 shadow-sm dark:border-[#0EB29A] dark:bg-[#1C332E] dark:shadow-[0_0_15px_rgba(14,178,154,0.25)]"
-                      : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 dark:border-[#294044] dark:bg-[#15282C] dark:hover:border-[#3E5556] dark:hover:bg-[#183F3E]/40"
-                  }`}
-                >
+                <div className="flex items-center justify-between gap-3 w-full">
                   <div className="flex items-center gap-3.5">
                     <div
-                      className={`w-10 h-10 rounded-[10px] flex items-center justify-center font-mono text-xs font-bold transition-colors ${
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center font-mono text-xs font-bold transition-colors ${
                         isSelected
                           ? "bg-sky-600 text-white dark:bg-[#0EB29A] dark:text-[#0D191C]"
                           : "bg-slate-100 text-slate-600 dark:bg-[#233A3D] dark:text-[#8C999A]"
@@ -137,21 +133,21 @@ export default function LanguageSelectionPage() {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm font-bold text-slate-900 dark:text-[#F5FDFF]">
+                        <span className="text-sm font-bold text-slate-900 dark:text-[#F5FDFF]">
                           {lang.name}
                         </span>
-                        <span className="text-xs font-mono text-sky-700 dark:text-[#DDF0C2] font-semibold">
+                        <span className="text-xs text-sky-700 dark:text-[#DDF0C2] font-semibold">
                           ({lang.native})
                         </span>
                       </div>
-                      <span className="text-[10px] font-mono tracking-wider text-slate-500 dark:text-[#8C999A]">
-                        LOCALE: {lang.region}
+                      <span className="text-[11px] font-mono tracking-wide text-slate-500 dark:text-[#8C999A]">
+                        {lang.region}
                       </span>
                     </div>
                   </div>
 
                   <div
-                    className={`w-6 h-6 rounded-full flex items-center justify-center border transition-all ${
+                    className={`w-6 h-6 rounded-full flex items-center justify-center border transition-all shrink-0 ${
                       isSelected
                         ? "border-sky-600 bg-sky-600 text-white dark:border-[#0EB29A] dark:bg-[#0EB29A] dark:text-[#0D191C]"
                         : "border-slate-200 bg-slate-100 dark:border-[#294044] dark:bg-[#101F23] text-transparent"
@@ -159,8 +155,8 @@ export default function LanguageSelectionPage() {
                   >
                     <Check className="w-3.5 h-3.5 stroke-[3]" />
                   </div>
-                </ChamferedCard>
-              </button>
+                </div>
+              </SelectableCard>
             );
           })}
         </div>

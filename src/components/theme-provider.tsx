@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { Theme } from "@astryxdesign/core/theme";
+import { neutralTheme } from "@astryxdesign/theme-neutral/built";
 
 type Theme = "light" | "dark" | "system";
 
@@ -87,7 +89,9 @@ export function ThemeProvider({
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme, resolvedTheme }}>
-      {children}
+      <Theme theme={neutralTheme} mode={resolvedTheme}>
+        {children}
+      </Theme>
     </ThemeContext.Provider>
   );
 }

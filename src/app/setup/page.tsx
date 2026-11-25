@@ -20,6 +20,9 @@ import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
+import { Banner } from "@astryxdesign/core/Banner";
+import { ProgressBar } from "@astryxdesign/core/ProgressBar";
+import { Slider } from "@astryxdesign/core/Slider";
 import { checkAiHealth, AiHealth } from "@/utils/aiClient";
 import { TestGuide } from "@/components/guide/TestGuide";
 import { useAutoAdvance, useAutopilot } from "@/context/autopilot";
@@ -327,30 +330,36 @@ export default function SetupCalibrationPage() {
           </div>
         </ChamferedCard>
 
-        {/* Ambient Noise Floor Telemetry */}
-        <ChamferedCard className="p-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-mono text-slate-600 dark:text-[#8C999A] uppercase tracking-wider font-semibold">
-              LIVE AMBIENT NOISE FLOOR
-            </span>
-            <span className="text-xs font-mono font-bold text-sky-700 dark:text-[#DDF0C2]">
-              {noiseFloorDbfs} dBFS
-            </span>
-          </div>
+        {/* Helpful fallback notice when camera or mic is unavailable */}
+        {!isCalibrating && (cameraStatus === "error" || micStatus === "error") && (
+          <Banner
+            status="info"
+            title="Photo & Sample Mode Available"
+            description="No live camera or microphone needed — you can upload a PCB photo or run tap-test diagnostics with sample data on the next screens."
+          />
+        )}
 
-          <div className="w-full h-3 bg-slate-200 dark:bg-[#101F23] rounded-full overflow-hidden border border-slate-300 dark:border-[#233A3D] p-0.5 flex items-center">
-            <div
-              className="h-full bg-gradient-to-r from-sky-500 via-indigo-500 to-red-500 dark:from-[#0EB29A] dark:via-[#DDF0C2] dark:to-[#FF4444] rounded-full transition-all duration-150"
-              style={{ width: `${Math.min(100, Math.max(6, ((noiseFloorDbfs + 90) / 90) * 100))}%` }}
-            />
-          </div>
+        {/* Ambient Noise Floor Telemetry (Astryx ProgressBar) */}
+        <ChamferedCard className="p-4 space-y-2.5">
+          <ProgressBar
+            label="Live Ambient Noise Floor"
+            value={Math.max(0, Math.min(90, noiseFloorDbfs + 90))}
+            max={90}
+            hasValueLabel
+            formatValueLabel={() => `${noiseFloorDbfs} dBFS`}
+            variant={micStatus !== "passed" ? "neutral" : noiseFloorDbfs < -20 ? "success" : "warning"}
+            marks={[
+              { value: 0, label: "-90 dBFS" },
+              { value: 70, label: "Optimal" },
+              { value: 90, label: "0 dBFS" },
+            ]}
+          />
 
-          <div className="flex justify-between items-center text-[10px] font-mono text-slate-500 dark:text-[#8C999A] mt-2">
-            <span>-90 dBFS (SILENT)</span>
+          <div className="flex justify-between items-center text-[11px] font-mono text-slate-500 dark:text-[#8C999A] pt-1">
+            <span>Room background level</span>
             <span className={noiseFloorDbfs < -20 ? "text-emerald-600 dark:text-[#4ADE80] font-semibold" : "text-amber-600 font-semibold"}>
-              {micStatus === "passed" ? (noiseFloorDbfs < -20 ? "OPTIMAL RANGE" : "HIGH AMBIENT NOISE") : "MIC OFFLINE"}
+              {micStatus === "passed" ? (noiseFloorDbfs < -20 ? "Optimal Quiet Range" : "High Ambient Noise") : "Mic Offline"}
             </span>
-            <span>0 dBFS</span>
           </div>
         </ChamferedCard>
 
@@ -401,20 +410,27 @@ export default function SetupCalibrationPage() {
             </div>
           </div>
 
-          <input
-            type="range"
-            min="200"
-            max="3000"
-            step="10"
+          <Slider
+            label="Sweep Frequency"
+            isLabelHidden
+            min={200}
+            max={3000}
+            step={10}
             value={sweepHz}
-            onChange={(e) => setSweepHz(Number(e.target.value))}
-            className="w-full accent-sky-600 dark:accent-[#0EB29A] bg-slate-200 dark:bg-[#101F23] h-2 rounded-lg cursor-pointer"
+            onChange={(val: number | [number, number]) => setSweepHz(typeof val === "number" ? val : val[0])}
+            formatValue={(v: number) => `${v} Hz`}
+            marks={[
+              { value: 200, label: "200 Hz" },
+              { value: 1000, label: "1 kHz" },
+              { value: 2000, label: "2 kHz" },
+              { value: 3000, label: "3 kHz" },
+            ]}
+            width="100%"
           />
 
-          <div className="flex justify-between text-[10px] font-mono text-slate-500 dark:text-[#8C999A]">
-            <span>200 HZ</span>
-            <span className="text-slate-700 dark:text-[#DDF0C2]">WEB AUDIO SINE GENERATOR</span>
-            <span>3000 HZ</span>
+          <div className="flex justify-between text-[10px] font-mono text-slate-500 dark:text-[#8C999A] pt-1">
+            <span>WEB AUDIO SINE GENERATOR</span>
+            <span className="text-slate-700 dark:text-[#DDF0C2]">{sweepHz} Hz</span>
           </div>
         </ChamferedCard>
 

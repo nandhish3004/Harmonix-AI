@@ -18,6 +18,8 @@ import {
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { VoiceToggle } from "@/components/ui/VoiceToggle";
 import { HarmonixLogo, triggerHarmonixSplash } from "@/components/ui/HarmonixLogo";
+import { Button } from "@astryxdesign/core/Button";
+import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 
 interface HudHeaderProps {
   title: string;
@@ -77,13 +79,15 @@ export const HudHeader: React.FC<HudHeaderProps> = ({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
           {(backHref || onBack) && (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
+              isIconOnly
+              label="Back"
+              icon={<ArrowLeft className="w-4 h-4" />}
               onClick={handleBack}
-              aria-label="Back"
-              className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-slate-100 dark:bg-[#15282C] border border-slate-200 dark:border-[#294044] text-slate-600 dark:text-[#8C999A] hover:text-slate-900 dark:hover:text-[#F5FDFF] hover:border-slate-300 dark:hover:border-[#0EB29A] transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
+              className="w-9 h-9 shrink-0 rounded-full bg-slate-100 dark:bg-[#15282C] border border-slate-200 dark:border-[#294044] text-slate-600 dark:text-[#8C999A]"
+            />
           )}
 
           <button
@@ -124,10 +128,13 @@ export const HudHeader: React.FC<HudHeaderProps> = ({
       )}
 
       {stepNum && (
-        <div className="mt-2.5 h-1.5 w-full rounded-full bg-slate-200 dark:bg-[#233A3D] overflow-hidden">
-          <div
-            className="h-full rounded-full bg-sky-600 dark:bg-[#0EB29A] transition-all duration-500"
-            style={{ width: `${(stepNum / 10) * 100}%` }}
+        <div className="mt-2.5">
+          <ProgressBar
+            label={`Inspection progress: step ${stepNum} of 10`}
+            isLabelHidden
+            value={stepNum}
+            max={10}
+            variant="accent"
           />
         </div>
       )}

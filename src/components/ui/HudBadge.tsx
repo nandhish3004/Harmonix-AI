@@ -1,4 +1,5 @@
 import React from "react";
+import { Badge } from "@astryxdesign/core/Badge";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -15,6 +16,19 @@ export const HudBadge: React.FC<HudBadgeProps> = ({
   className,
   dot = false,
 }) => {
+  const astryxVariant: "info" | "purple" | "error" | "success" | "neutral" | "warning" =
+    variant === "teal"
+      ? "info"
+      : variant === "lime"
+      ? "purple"
+      : variant === "danger"
+      ? "error"
+      : variant === "safe"
+      ? "success"
+      : variant === "warning"
+      ? "warning"
+      : "neutral";
+
   const variantStyles = {
     teal: "bg-sky-50 text-sky-700 border-sky-200 dark:bg-[#0EB29A]/15 dark:text-[#0EB29A] dark:border-[#0EB29A]/40",
     lime: "bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-[#DDF0C2]/15 dark:text-[#DDF0C2] dark:border-[#DDF0C2]/40",
@@ -34,24 +48,26 @@ export const HudBadge: React.FC<HudBadgeProps> = ({
   };
 
   return (
-    <span
+    <Badge
+      variant={astryxVariant}
+      label={children}
+      icon={
+        dot ? (
+          <span
+            className={clsx(
+              "w-1.5 h-1.5 rounded-full animate-pulse inline-block",
+              dotColors[variant]
+            )}
+          />
+        ) : undefined
+      }
       className={twMerge(
         clsx(
-          "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono uppercase tracking-wider rounded-full border shadow-xs transition-colors",
+          "px-2.5 py-1 text-xs font-mono uppercase tracking-wider rounded-full border transition-colors",
           variantStyles[variant],
           className
         )
       )}
-    >
-      {dot && (
-        <span
-          className={clsx(
-            "w-1.5 h-1.5 rounded-full animate-pulse",
-            dotColors[variant]
-          )}
-        />
-      )}
-      {children}
-    </span>
+    />
   );
 };
