@@ -44,24 +44,23 @@ export const HudButton: React.FC<HudButtonProps> = ({
 
   const customAccentClass: Record<NonNullable<HudButtonProps["variant"]>, string> = {
     primary:
-      "dark:bg-[#0EB29A] dark:text-[#0D191C] dark:hover:bg-[#12caa0] dark:shadow-[0_0_15px_rgba(14,178,154,0.3)]",
+      "!bg-slate-900 !text-white hover:!bg-slate-800 dark:!bg-[#0EB29A] dark:!text-[#0D191C] dark:hover:!bg-[#12caa0] shadow-sm",
     lime:
-      "bg-sky-600 text-white hover:bg-sky-700 dark:bg-[#DDF0C2] dark:text-[#0D191C] dark:hover:bg-[#eaffd4]",
+      "!bg-sky-600 !text-white hover:!bg-sky-700 dark:!bg-[#DDF0C2] dark:!text-[#0D191C] dark:hover:!bg-[#eaffd4] shadow-sm",
     secondary:
-      "dark:bg-[#233A3D] dark:text-[#F5FDFF] dark:border-[#294044] dark:hover:bg-[#2c474b]",
+      "!bg-white !text-slate-900 !border !border-slate-200 hover:!bg-slate-50 dark:!bg-[#233A3D] dark:!text-[#F5FDFF] dark:!border-[#294044] dark:hover:!bg-[#2c474b] shadow-xs",
     danger:
-      "dark:bg-[#2D0A0A] dark:text-[#FF4444] dark:border-[#FF4444]/60",
+      "!bg-red-50 !text-red-700 !border !border-red-200 hover:!bg-red-100 dark:!bg-[#2D0A0A] dark:!text-[#FF4444] dark:!border-[#FF4444]/60",
     ghost:
-      "dark:text-[#8C999A] dark:hover:text-[#F5FDFF] dark:hover:bg-[#15282C]",
+      "!bg-transparent !text-slate-700 hover:!text-slate-900 hover:!bg-slate-100 dark:!text-[#8C999A] dark:hover:!text-[#F5FDFF] dark:hover:!bg-[#15282C]",
     safe:
-      "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 dark:bg-[#0D2B1A] dark:text-[#4ADE80] dark:border-[#4ADE80]/60 font-bold",
+      "!bg-emerald-50 !text-emerald-800 !border !border-emerald-300 hover:!bg-emerald-100 dark:!bg-[#0D2B1A] dark:!text-[#4ADE80] dark:!border-[#4ADE80]/60 font-bold",
   };
 
   const label = extractText(children) || "Action";
   const safeType: "button" | "submit" | "reset" =
     type === "submit" || type === "reset" ? type : "button";
 
-  // Filter out HTMLAttributes omitted by Astryx BaseProps (title, color, etc.)
   const {
     color: _color,
     defaultChecked: _dc,
@@ -85,7 +84,7 @@ export const HudButton: React.FC<HudButtonProps> = ({
       onClick={onClick}
       className={twMerge(
         clsx(
-          "font-bold tracking-normal transition-all duration-200 active:scale-[0.98]",
+          "font-bold tracking-normal transition-all duration-200 active:scale-[0.98] whitespace-nowrap",
           fullWidth && "w-full",
           customAccentClass[variant],
           className
@@ -93,7 +92,9 @@ export const HudButton: React.FC<HudButtonProps> = ({
       )}
       {...(baseProps as Record<string, unknown>)}
     >
-      {children}
+      <span className="inline-flex items-center justify-center gap-2 whitespace-nowrap min-w-0">
+        {children}
+      </span>
     </Button>
   );
 };

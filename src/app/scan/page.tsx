@@ -707,43 +707,37 @@ export default function WorkpieceScanPage() {
           </div>
         )}
 
-        {/* Uniform Action Controls Bar */}
-        <div className="grid grid-cols-4 gap-2">
+        {/* Uniform Action Controls Bar (2x2 on mobile, 4-across on wider screens so labels never clip) */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <HudButton
             variant="secondary"
-            size="sm"
+            size="md"
             fullWidth
             isLoading={isAiRunning}
             onClick={handleAutoSegment}
           >
-            <span className="flex items-center justify-center gap-1 whitespace-nowrap">
-              <Sparkles className="w-3.5 h-3.5 text-sky-600 dark:text-[#DDF0C2] shrink-0" />
-              <span>AI Snap</span>
-            </span>
+            <Sparkles className="w-4 h-4 text-sky-600 dark:text-[#DDF0C2] shrink-0" />
+            <span>AI Snap</span>
           </HudButton>
 
           <HudButton
             variant="secondary"
-            size="sm"
+            size="md"
             fullWidth
             onClick={handleLoadSamplePcb}
           >
-            <span className="flex items-center justify-center gap-1 whitespace-nowrap">
-              <Cpu className="w-3.5 h-3.5 text-emerald-600 dark:text-[#4ADE80] shrink-0" />
-              <span>Sample</span>
-            </span>
+            <Cpu className="w-4 h-4 text-emerald-600 dark:text-[#4ADE80] shrink-0" />
+            <span>Sample</span>
           </HudButton>
 
           <HudButton
             variant="secondary"
-            size="sm"
+            size="md"
             fullWidth
             onClick={() => fileInputRef.current?.click()}
           >
-            <span className="flex items-center justify-center gap-1 whitespace-nowrap">
-              <Upload className="w-3.5 h-3.5 text-sky-600 dark:text-[#0EB29A] shrink-0" />
-              <span>Photo</span>
-            </span>
+            <Upload className="w-4 h-4 text-sky-600 dark:text-[#0EB29A] shrink-0" />
+            <span>Photo</span>
           </HudButton>
           <input
             ref={fileInputRef}
@@ -755,23 +749,21 @@ export default function WorkpieceScanPage() {
 
           <HudButton
             variant={isLocked ? "safe" : "secondary"}
-            size="sm"
+            size="md"
             fullWidth
             onClick={isLocked ? unlockBoundary : lockBoundary}
           >
-            <span className="flex items-center justify-center gap-1 whitespace-nowrap">
-              {isLocked ? (
-                <>
-                  <Unlock className="w-3.5 h-3.5 text-emerald-600 dark:text-inherit shrink-0" />
-                  <span>Unlock</span>
-                </>
-              ) : (
-                <>
-                  <Lock className="w-3.5 h-3.5 text-sky-600 dark:text-[#0EB29A] shrink-0" />
-                  <span>Lock</span>
-                </>
-              )}
-            </span>
+            {isLocked ? (
+              <>
+                <Unlock className="w-4 h-4 text-emerald-600 dark:text-inherit shrink-0" />
+                <span>Unlock</span>
+              </>
+            ) : (
+              <>
+                <Lock className="w-4 h-4 text-sky-600 dark:text-[#0EB29A] shrink-0" />
+                <span>Lock</span>
+              </>
+            )}
           </HudButton>
         </div>
 

@@ -145,7 +145,7 @@ export default function AuthPage() {
 
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-[#F5FDFF]">
-            Sign in to HARMONIX-AR
+            {tab === "signin" ? "Sign in to HARMONIX-AR" : "Create your HARMONIX-AR account"}
           </h1>
           <p className="text-sm text-slate-600 dark:text-[#8C999A] mt-1 leading-relaxed">
             Sync your workpiece scans, vibration profiles, and defect logs across devices.
@@ -200,11 +200,12 @@ export default function AuthPage() {
           </span>
         </Button>
 
-        <div className="relative flex items-center justify-center">
-          <div className="border-t border-slate-200 dark:border-[#294044] w-full" />
-          <span className="bg-slate-50 dark:bg-[#0D191C] px-3 font-mono text-[10px] tracking-widest text-slate-500 dark:text-[#8C999A] uppercase">
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-slate-200 dark:bg-[#294044]" />
+          <span className="font-mono text-[10px] tracking-widest text-slate-500 dark:text-[#8C999A] uppercase whitespace-nowrap">
             OR OPERATOR CREDENTIALS
           </span>
+          <div className="h-px flex-1 bg-slate-200 dark:bg-[#294044]" />
         </div>
 
         {/* Error / Success Astryx Banners */}

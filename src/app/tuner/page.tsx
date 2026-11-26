@@ -719,20 +719,25 @@ export default function FindItsNotePage() {
         title="Find Its Note"
         step="SCREEN 05 // 10"
         backHref="/viewport"
-        rightAction={
-          <HudBadge variant={phase === "done" ? "safe" : phase === "listening" ? "teal" : "warning"} dot>
-            {phase === "done"
-              ? `${resultHz} HZ LOCKED`
-              : phase === "listening"
-              ? livePeakHz
-                ? `LIVE PEAK ${livePeakHz} HZ`
-                : "LISTENING"
-              : "READY"}
-          </HudBadge>
-        }
       />
 
       <div className="p-4 space-y-3.5 flex-1 flex flex-col">
+        <div className="flex items-center justify-between gap-2">
+          <HudBadge variant={phase === "done" ? "safe" : phase === "listening" ? "teal" : "warning"} dot>
+            {phase === "done"
+              ? `${resultHz} Hz Locked`
+              : phase === "listening"
+              ? livePeakHz
+                ? `Live Peak ${livePeakHz} Hz`
+                : "Listening for Tap..."
+              : "Mic Ready"}
+          </HudBadge>
+          {micProfileInfo && (
+            <span className="text-[11px] font-mono text-slate-500 dark:text-[#8C999A]">
+              {micProfileInfo}
+            </span>
+          )}
+        </div>
         <TestGuide kind="tap" open={guideOpen} onDone={() => setGuideOpen(false)} />
 
         {/* Real-Time Dual Oscilloscope & 65k-FFT Spectrum Analyzer HUD */}
@@ -783,24 +788,24 @@ export default function FindItsNotePage() {
               </button>
             </div>
 
-            <div className="flex flex-col gap-2 text-left">
+            <div className="flex flex-col gap-2.5 text-left">
               <HudButton
                 variant="secondary"
                 size="md"
+                fullWidth
                 onClick={runActiveSonarPing}
-                className="flex items-center gap-1.5"
               >
-                <Radio className="w-4 h-4 text-sky-600 dark:text-[#0EB29A]" />
+                <Radio className="w-4 h-4 text-sky-600 dark:text-[#0EB29A] shrink-0" />
                 <span className="text-xs font-bold">Active Sonar Ping</span>
               </HudButton>
 
               <HudButton
                 variant="secondary"
                 size="md"
+                fullWidth
                 onClick={useEstimate}
-                className="flex items-center gap-1.5"
               >
-                <Sparkles className="w-4 h-4 text-emerald-600 dark:text-[#4ADE80]" />
+                <Sparkles className="w-4 h-4 text-emerald-600 dark:text-[#4ADE80] shrink-0" />
                 <span className="text-xs font-bold">Solve FEA Baseline</span>
               </HudButton>
             </div>

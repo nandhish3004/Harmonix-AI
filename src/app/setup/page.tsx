@@ -286,10 +286,10 @@ export default function SetupCalibrationPage() {
               dot
             >
               {isCalibrating
-                ? "PROBING SENSORS"
+                ? "Probing..."
                 : micStatus === "passed" && cameraStatus === "passed"
-                ? "SENSORS ONLINE"
-                : "PARTIAL / PHOTO MODE"}
+                ? "Sensors Ready"
+                : "Photo Mode"}
             </HudBadge>
           </div>
 
@@ -472,7 +472,7 @@ export default function SetupCalibrationPage() {
             protects risky parts and builds the report — with voice guidance if you want it.
           </p>
           <HudButton
-            variant="secondary"
+            variant="lime"
             size="lg"
             fullWidth
             onClick={() => {
@@ -480,9 +480,9 @@ export default function SetupCalibrationPage() {
               void speak("Autopilot on. I will guide you through every step.");
               router.push("/scan");
             }}
-            className="flex items-center justify-center gap-2"
           >
-            <span>{autopilotOn ? "Autopilot is ON — restart" : "Start AI Autopilot"}</span>
+            <span>{autopilotOn ? "Restart AI Autopilot" : "Start AI Autopilot"}</span>
+            <ArrowRight className="w-4 h-4 shrink-0" />
           </HudButton>
         </div>
 
@@ -496,10 +496,9 @@ export default function SetupCalibrationPage() {
               if (isTonePlaying) toggleTestTone();
               router.push("/scan");
             }}
-            className="flex items-center justify-center gap-2"
           >
-            <span>CALIBRATION COMPLETE → PROCEED TO SCAN</span>
-            <ArrowRight className="w-4 h-4" />
+            <span>Continue to Scan</span>
+            <ArrowRight className="w-4 h-4 shrink-0" />
           </HudButton>
         </div>
       </div>

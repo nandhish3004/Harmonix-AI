@@ -44,7 +44,7 @@ export const HudNav: React.FC = () => {
   }
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 dark:bg-[#0D191C]/95 backdrop-blur-lg border-t border-slate-200 dark:border-[#294044] px-2 py-2 transition-colors duration-200">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-[#0D191C] border-t border-slate-200 dark:border-[#294044] px-2 py-2 shadow-[0_-4px_20px_rgba(15,23,42,0.06)] transition-colors duration-200">
       <div className="max-w-[480px] mx-auto flex items-center overflow-x-auto no-scrollbar gap-1.5 px-1">
         {PIPELINE_STEPS.map((step, idx) => {
           const Icon = step.icon;

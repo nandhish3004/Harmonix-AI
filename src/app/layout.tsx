@@ -36,7 +36,7 @@ export default function RootLayout({
           <HarmonixSplash />
           <div className="w-full max-w-[480px] min-h-screen bg-white dark:bg-[#0D191C] border-x border-slate-200 dark:border-[#294044]/50 flex flex-col relative shadow-xl">
             <AutopilotProvider>
-              <main className="flex-1 pb-20">{children}</main>
+              <main className="flex-1 pb-24">{children}</main>
               <HudNav />
             </AutopilotProvider>
           </div>
