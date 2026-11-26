@@ -135,12 +135,14 @@ export async function detectBoardHF(
   ]);
 
   if (obj && cls) {
+    const objMat = materialFromLabel(obj.label);
+    const useObjLabel = objMat !== null && obj.score >= cls.score * 0.85;
     return {
-      model: "Xenova/yolos-tiny + mobilevit-small (ONNX)",
-      label: obj.score >= 0.25 ? obj.label : cls.label,
+      model: "Xenova/yolos-tiny + mobilevit-small (ONNX Ensemble)",
+      label: useObjLabel ? obj.label : cls.label,
       score: Math.max(obj.score, cls.score),
       boxNorm: obj.boxNorm,
-      materialId: obj.score >= 0.25 ? materialFromLabel(obj.label) ?? cls.materialId : cls.materialId,
+      materialId: useObjLabel ? objMat : cls.materialId,
     };
   }
 

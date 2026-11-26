@@ -18,6 +18,7 @@ import { HudHeader } from "@/components/ui/HudHeader";
 import { ChamferedCard } from "@/components/ui/ChamferedCard";
 import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
+import { Switch } from "@astryxdesign/core/Switch";
 import { useBoundaryDetection } from "@/hooks/useBoundaryDetection";
 import { detectBoardHF } from "@/utils/aiClient";
 import { preloadVisionModels } from "@/utils/browserHf";
@@ -490,32 +491,10 @@ export default function WorkpieceScanPage() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#0D191C] flex flex-col select-none transition-colors duration-200">
       <HudHeader
-        title="EDGE DETECTION"
+        title="Scan Your Board"
         step="SCREEN 02 // 10"
-        subtitle="Workpiece Boundary Segmentation"
+        subtitle="Point at your board — AI finds the edges automatically."
         backHref="/setup"
-        rightAction={
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setShowEdgeOverlay((v) => !v)}
-              className={`w-8 h-8 flex items-center justify-center rounded-[8px] border transition-colors ${
-                showEdgeOverlay
-                  ? "bg-sky-50 border-sky-300 text-sky-700 dark:bg-[#0EB29A]/20 dark:border-[#0EB29A] dark:text-[#0EB29A]"
-                  : "bg-slate-100 dark:bg-[#15282C] border-slate-200 dark:border-[#294044] text-slate-600 dark:text-[#8C999A]"
-              }`}
-              title="Toggle Sobel Edge Overlay"
-            >
-              <Eye className="w-4 h-4" />
-            </button>
-            <button
-              onClick={resetDefaultBoundary}
-              className="w-8 h-8 flex items-center justify-center rounded-[8px] bg-slate-100 dark:bg-[#15282C] border border-slate-200 dark:border-[#294044] text-slate-600 dark:text-[#8C999A] hover:text-slate-900 dark:hover:text-[#F5FDFF] hover:border-slate-300 dark:hover:border-[#0EB29A]"
-              title="Reset Pins"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
-          </div>
-        }
       />
 
       <div className="p-4 space-y-3 flex-1 flex flex-col">
@@ -571,21 +550,55 @@ export default function WorkpieceScanPage() {
             </div>
           )}
 
-          {/* SVG Polygon overlay connecting P1 -> P2 -> P3 -> P4 */}
+          {/* Advanced AR Boundary Reticle Overlay */}
           <svg className="absolute inset-0 w-full h-full pointer-events-none">
+            <defs>
+              <linearGradient id="arScanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor={isLocked ? "#4ADE80" : "#0284C7"} stopOpacity="0.22" />
+                <stop offset="100%" stopColor={isLocked ? "#0EB29A" : "#38BDF8"} stopOpacity="0.06" />
+              </linearGradient>
+            </defs>
             <polygon
               points={polygonCoords.map((p) => `${p.x},${p.y}`).join(" ")}
+              fill="url(#arScanGrad)"
               className={
                 isLocked
-                  ? "fill-emerald-500/15 stroke-emerald-600 dark:fill-[#4ADE80]/15 dark:stroke-[#4ADE80]"
-                  : "fill-sky-500/10 stroke-sky-600 dark:fill-[#0EB29A]/15 dark:stroke-[#0EB29A]"
+                  ? "stroke-emerald-500 dark:stroke-[#4ADE80]"
+                  : "stroke-sky-500 dark:stroke-[#0EB29A]"
               }
-              strokeWidth="2.5"
-              strokeDasharray={isLocked ? "none" : "5 5"}
+              strokeWidth="2"
+              strokeDasharray={isLocked ? "none" : "6 4"}
             />
+            {/* Precision L-bracket corner reticles at P1..P4 */}
+            {polygonCoords.map((pt, idx) => {
+              const prev = polygonCoords[(idx + 3) % 4];
+              const next = polygonCoords[(idx + 1) % 4];
+              const d1x = prev.x - pt.x;
+              const d1y = prev.y - pt.y;
+              const l1 = Math.hypot(d1x, d1y) || 1;
+              const d2x = next.x - pt.x;
+              const d2y = next.y - pt.y;
+              const l2 = Math.hypot(d2x, d2y) || 1;
+              const arm = 16;
+              const p1x = pt.x + (d1x / l1) * arm;
+              const p1y = pt.y + (d1y / l1) * arm;
+              const p2x = pt.x + (d2x / l2) * arm;
+              const p2y = pt.y + (d2y / l2) * arm;
+              return (
+                <path
+                  key={`bracket-${idx}`}
+                  d={`M ${p1x} ${p1y} L ${pt.x} ${pt.y} L ${p2x} ${p2y}`}
+                  fill="none"
+                  stroke={isLocked ? "#22C55E" : "#38BDF8"}
+                  strokeWidth="3.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              );
+            })}
           </svg>
 
-          {/* Draggable Corner Pins */}
+          {/* Compact Precision Corner Handles */}
           {polygonCoords.map((pt, idx) => (
             <div
               key={idx}
@@ -595,7 +608,7 @@ export default function WorkpieceScanPage() {
                 top: `${pt.y}px`,
                 transform: "translate(-50%, -50%)",
               }}
-              className={`absolute w-7 h-7 rounded-full flex items-center justify-center font-mono text-[10px] font-bold cursor-grab active:cursor-grabbing transition-transform ${
+              className={`absolute w-6 h-6 rounded-full flex items-center justify-center font-mono text-[9px] font-extrabold cursor-grab active:cursor-grabbing transition-transform ring-2 ring-white/80 dark:ring-[#0D191C]/80 ${
                 activePinIndex === idx ? "scale-125 z-30" : "z-20"
               } ${
                 isLocked
@@ -607,8 +620,8 @@ export default function WorkpieceScanPage() {
             </div>
           ))}
 
-          {/* Live Floating Telemetry Overlay */}
-          <div className="absolute top-3 left-3 flex flex-col gap-1.5 pointer-events-none">
+          {/* Top Bar: Non-overlapping Status Pill + Viewport Controls */}
+          <div className="absolute top-2.5 inset-x-2.5 flex items-center justify-between gap-2 z-20 pointer-events-none">
             <HudBadge
               variant={
                 isLocked
@@ -618,77 +631,119 @@ export default function WorkpieceScanPage() {
                   : "warning"
               }
               dot
+              className="max-w-[70%] truncate backdrop-blur-md"
             >
               {isLocked
-                ? "POLYGON LOCKED"
+                ? `LOCKED • ${edgeConfidence}%`
                 : uploadedImageUrl
-                ? `IMAGE CV // ${edgeConfidence}% CONF`
+                ? `IMAGE CV • ${edgeConfidence}%`
                 : cameraActive
                 ? edgeConfidence === 0
-                  ? "WAITING FOR WORKPIECE — PLACE BOARD IN FRAME"
+                  ? "AIM AT BOARD"
                   : isAutoTracking
-                  ? `LIVE CV TRACKING // ${edgeConfidence}%`
-                  : "MANUAL PIN MODE"
+                  ? `AI TRACKING • ${edgeConfidence}%`
+                  : "MANUAL PINS"
                 : "MANUAL MODE"}
             </HudBadge>
-            <div className="bg-white/95 dark:bg-[#0D191C]/85 backdrop-blur-md px-2.5 py-1 rounded-[8px] border border-slate-200 dark:border-[#294044] text-[10px] font-mono text-slate-600 dark:text-[#8C999A] shadow-xs">
-              RATIO: <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">{aspectRatio}:1</span> // AREA:{" "}
-              <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">{areaMm2} mm²</span>
+
+            <div className="flex items-center gap-1.5 pointer-events-auto">
+              <button
+                type="button"
+                onClick={() => setShowEdgeOverlay((v) => !v)}
+                className={`w-8 h-8 flex items-center justify-center rounded-full border backdrop-blur-md transition-colors ${
+                  showEdgeOverlay
+                    ? "bg-sky-600/90 border-sky-400 text-white dark:bg-[#0EB29A]/90 dark:border-[#0EB29A] dark:text-[#0D191C]"
+                    : "bg-white/85 dark:bg-[#0D191C]/85 border-slate-300 dark:border-[#294044] text-slate-700 dark:text-[#8C999A]"
+                }`}
+                title="Toggle Sobel Edge Overlay"
+              >
+                <Eye className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={resetDefaultBoundary}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-white/85 dark:bg-[#0D191C]/85 backdrop-blur-md border border-slate-300 dark:border-[#294044] text-slate-700 dark:text-[#F5FDFF]"
+                title="Reset Pins"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+              {uploadedImageUrl && (
+                <button
+                  type="button"
+                  onClick={clearUploadedImage}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-white/85 dark:bg-[#0D191C]/85 backdrop-blur-md border border-slate-300 dark:border-[#294044] text-slate-700 dark:text-[#F5FDFF]"
+                  title="Clear Photo"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </div>
 
-          {uploadedImageUrl && (
-            <button
-              onClick={clearUploadedImage}
-              className="absolute top-3 right-3 z-20 px-2 py-1 rounded-[6px] bg-white/90 dark:bg-[#0D191C]/90 border border-slate-300 dark:border-[#294044] text-[10px] font-mono text-slate-700 dark:text-[#F5FDFF] flex items-center gap-1"
-            >
-              <X className="w-3 h-3" /> CLEAR PHOTO
-            </button>
-          )}
+          {/* Bottom-Left Geometry Readout (never overlaps P1) */}
+          <div className="absolute bottom-2.5 left-2.5 z-20 pointer-events-none bg-white/90 dark:bg-[#0D191C]/90 backdrop-blur-md px-2.5 py-1 rounded-full border border-slate-200 dark:border-[#294044] text-[10px] font-mono text-slate-600 dark:text-[#8C999A] shadow-xs">
+            RATIO <span className="text-slate-900 dark:text-[#F5FDFF] font-bold">{aspectRatio}:1</span> ·{" "}
+            <span className="text-sky-700 dark:text-[#DDF0C2] font-bold">{areaMm2} mm²</span>
+          </div>
         </div>
 
         <TestGuide kind="scan" open={guideOpen} onDone={() => setGuideOpen(false)} />
-        <div className="text-[11px] font-semibold text-slate-500 dark:text-[#8C999A] flex items-center gap-1.5 px-1">
-          <span className="inline-block w-2 h-2 rounded-full bg-sky-500 dark:bg-[#0EB29A]" />
-          AI engine: {aiEngine}
+
+        {/* Professional AI Pipeline Telemetry Pill */}
+        <div className="flex items-center justify-between px-3 py-2 rounded-2xl bg-white dark:bg-[#15282C] border border-slate-200 dark:border-[#294044] text-xs shadow-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="inline-block w-2 h-2 rounded-full bg-sky-500 dark:bg-[#0EB29A] animate-pulse shrink-0" />
+            <span className="font-semibold text-slate-700 dark:text-[#F5FDFF] truncate">
+              AI Pipeline: <span className="text-sky-700 dark:text-[#0EB29A]">{aiEngine}</span>
+            </span>
+          </div>
+          <span className="font-mono text-[11px] font-bold text-slate-500 dark:text-[#8C999A] shrink-0">
+            {edgeConfidence}% conf
+          </span>
         </div>
         {scanMessage && (
-          <div className="px-3 py-2 rounded-[8px] bg-sky-50 dark:bg-[#15282C] border border-sky-200 dark:border-[#0EB29A]/50 text-[11px] font-mono text-sky-800 dark:text-[#DDF0C2]">
+          <div className="px-3 py-2 rounded-xl bg-sky-50 dark:bg-[#15282C] border border-sky-200 dark:border-[#0EB29A]/50 text-xs font-medium text-sky-900 dark:text-[#DDF0C2]">
             {scanMessage}
           </div>
         )}
 
-        {/* Action Controls Bar */}
+        {/* Uniform Action Controls Bar */}
         <div className="grid grid-cols-4 gap-2">
           <HudButton
             variant="secondary"
-            size="md"
+            size="sm"
+            fullWidth
             isLoading={isAiRunning}
             onClick={handleAutoSegment}
-            className="flex items-center justify-center gap-1 px-1.5"
           >
-            <Sparkles className="w-3.5 h-3.5 text-sky-600 dark:text-[#DDF0C2]" />
-            <span className="text-[10px]">AI SNAP</span>
+            <span className="flex items-center justify-center gap-1 whitespace-nowrap">
+              <Sparkles className="w-3.5 h-3.5 text-sky-600 dark:text-[#DDF0C2] shrink-0" />
+              <span>AI Snap</span>
+            </span>
           </HudButton>
 
           <HudButton
             variant="secondary"
-            size="md"
+            size="sm"
+            fullWidth
             onClick={handleLoadSamplePcb}
-            className="flex items-center justify-center gap-1 px-1.5"
           >
-            <Cpu className="w-3.5 h-3.5 text-emerald-600 dark:text-[#4ADE80]" />
-            <span className="text-[10px]">SAMPLE</span>
+            <span className="flex items-center justify-center gap-1 whitespace-nowrap">
+              <Cpu className="w-3.5 h-3.5 text-emerald-600 dark:text-[#4ADE80] shrink-0" />
+              <span>Sample</span>
+            </span>
           </HudButton>
 
           <HudButton
             variant="secondary"
-            size="md"
+            size="sm"
+            fullWidth
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center justify-center gap-1 px-1.5"
           >
-            <Upload className="w-3.5 h-3.5 text-sky-600 dark:text-[#0EB29A]" />
-            <span className="text-[10px]">PHOTO</span>
+            <span className="flex items-center justify-center gap-1 whitespace-nowrap">
+              <Upload className="w-3.5 h-3.5 text-sky-600 dark:text-[#0EB29A] shrink-0" />
+              <span>Photo</span>
+            </span>
           </HudButton>
           <input
             ref={fileInputRef}
@@ -700,38 +755,38 @@ export default function WorkpieceScanPage() {
 
           <HudButton
             variant={isLocked ? "safe" : "secondary"}
-            size="md"
+            size="sm"
+            fullWidth
             onClick={isLocked ? unlockBoundary : lockBoundary}
-            className="flex items-center justify-center gap-1 px-1.5"
           >
-            {isLocked ? (
-              <>
-                <Unlock className="w-3.5 h-3.5 text-emerald-600 dark:text-inherit" />
-                <span className="text-[10px]">UNLOCK</span>
-              </>
-            ) : (
-              <>
-                <Lock className="w-3.5 h-3.5 text-sky-600 dark:text-[#0EB29A]" />
-                <span className="text-[10px]">LOCK</span>
-              </>
-            )}
+            <span className="flex items-center justify-center gap-1 whitespace-nowrap">
+              {isLocked ? (
+                <>
+                  <Unlock className="w-3.5 h-3.5 text-emerald-600 dark:text-inherit shrink-0" />
+                  <span>Unlock</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="w-3.5 h-3.5 text-sky-600 dark:text-[#0EB29A] shrink-0" />
+                  <span>Lock</span>
+                </>
+              )}
+            </span>
           </HudButton>
         </div>
 
-        {/* Live CV Auto-Track toggle when camera is active */}
+        {/* Live CV Auto-Track Switch (Astryx Switch) */}
         {cameraActive && !uploadedImageUrl && !isLocked && (
-          <div className="flex items-center justify-between px-3 py-2 bg-white dark:bg-[#15282C] rounded-[10px] border border-slate-200 dark:border-[#294044] text-[11px] font-mono">
-            <span className="text-slate-600 dark:text-[#8C999A]">CONTINUOUS LIVE CV TRACKING</span>
-            <button
-              onClick={() => setAutoTracking(!isAutoTracking)}
-              className={`px-2.5 py-0.5 rounded font-bold border ${
-                isAutoTracking
-                  ? "bg-sky-600 text-white border-sky-600 dark:bg-[#0EB29A] dark:text-[#0D191C] dark:border-[#0EB29A]"
-                  : "bg-slate-100 text-slate-600 border-slate-300 dark:bg-[#101F23] dark:text-[#8C999A] dark:border-[#294044]"
-              }`}
-            >
-              {isAutoTracking ? "ON" : "PAUSED"}
-            </button>
+          <div className="px-3.5 py-2.5 bg-white dark:bg-[#15282C] rounded-2xl border border-slate-200 dark:border-[#294044]">
+            <Switch
+              label="Continuous Live AI Edge Tracking"
+              labelPosition="start"
+              labelSpacing="spread"
+              width="100%"
+              size="sm"
+              value={isAutoTracking}
+              onChange={(checked: boolean) => setAutoTracking(checked)}
+            />
           </div>
         )}
 

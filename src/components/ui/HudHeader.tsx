@@ -75,9 +75,9 @@ export const HudHeader: React.FC<HudHeaderProps> = ({
   const shownTip = friendly ? friendly.tip : subtitle;
 
   return (
-    <header className="w-full sticky top-0 z-50 bg-white/95 dark:bg-[#0D191C]/95 backdrop-blur-md border-b border-slate-200 dark:border-[#294044] px-4 pt-3 pb-3 transition-colors duration-200">
+    <header className="w-full sticky top-0 z-50 bg-white/95 dark:bg-[#0D191C]/95 backdrop-blur-md border-b border-slate-200 dark:border-[#294044] px-3 sm:px-4 pt-2.5 pb-2.5 transition-colors duration-200">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           {(backHref || onBack) && (
             <Button
               variant="secondary"
@@ -86,7 +86,7 @@ export const HudHeader: React.FC<HudHeaderProps> = ({
               label="Back"
               icon={<ArrowLeft className="w-4 h-4" />}
               onClick={handleBack}
-              className="w-9 h-9 shrink-0 rounded-full bg-slate-100 dark:bg-[#15282C] border border-slate-200 dark:border-[#294044] text-slate-600 dark:text-[#8C999A]"
+              className="w-8 h-8 shrink-0 rounded-full bg-slate-100 dark:bg-[#15282C] border border-slate-200 dark:border-[#294044] text-slate-600 dark:text-[#8C999A]"
             />
           )}
 
@@ -99,16 +99,16 @@ export const HudHeader: React.FC<HudHeaderProps> = ({
             <HarmonixLogo size="sm" />
           </button>
 
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             {stepNum && (
-              <span className="block text-[10px] tracking-wide text-sky-600 dark:text-[#0EB29A] font-semibold">
+              <span className="block text-[10px] tracking-wide text-sky-600 dark:text-[#0EB29A] font-semibold leading-tight">
                 Step {stepNum} of 10
               </span>
             )}
-            <h1 className="text-lg font-extrabold leading-tight text-slate-900 dark:text-[#F5FDFF] flex items-center gap-2 truncate">
+            <h1 className="text-base sm:text-lg font-extrabold leading-tight text-slate-900 dark:text-[#F5FDFF] flex items-center gap-1.5 min-w-0">
               {HeaderIcon && (
-                <span className="w-6 h-6 shrink-0 rounded-lg bg-sky-50 dark:bg-[#1C332E] text-sky-600 dark:text-[#0EB29A] flex items-center justify-center">
-                  <HeaderIcon className="w-3.5 h-3.5" />
+                <span className="w-5 h-5 shrink-0 rounded-md bg-sky-50 dark:bg-[#1C332E] text-sky-600 dark:text-[#0EB29A] flex items-center justify-center">
+                  <HeaderIcon className="w-3 h-3" />
                 </span>
               )}
               <span className="truncate">{shownTitle}</span>
@@ -116,7 +116,7 @@ export const HudHeader: React.FC<HudHeaderProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <VoiceToggle />
           <ThemeToggle />
           {rightAction}

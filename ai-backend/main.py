@@ -17,11 +17,12 @@ import math
 from typing import List, Optional
 
 import numpy as np
+import scipy.ndimage as ndi
 import torch
 import torch.nn as nn
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image
+from PIL import Image, ImageOps
 from pydantic import BaseModel
 
 app = FastAPI(title="HARMONIX-AR PyTorch + HuggingFace Engine", version="1.0.0")
@@ -132,29 +133,15 @@ def health():
     }
 
 
-@app.post("/api/cv/segment-plate")
-async def segment_plate(
-    file: UploadFile = File(...),
-    target_width: int = Form(360),
-    target_height: int = Form(380),
-):
-    """
-    Uses Hugging Face DINOv2 (facebook/dinov2-small) patch embeddings to separate
-    the foreground PCB/workpiece from the background and extract P1-P4 corners.
-    """
-    raw = await file.read()
-    img = Image.open(io.BytesIO(raw)).convert("RGB")
-    processor, model = get_dinov2()
-
+def _dinov2_fg_map(img: Image.Image, processor, model) -> np.ndarray:
+    """Compute patch-level cosine-distance foreground map from DINOv2 patch embeddings."""
     inputs = processor(images=img, return_tensors="pt").to(DEVICE)
     with torch.inference_mode():
         outputs = model(**inputs)
-        # Patch tokens (excluding CLS token): shape (1, num_patches, dim)
         patches = outputs.last_hidden_state[:, 1:, :]
         grid_side = int(math.sqrt(patches.shape[1]))
         patch_map = patches.reshape(grid_side, grid_side, -1)
 
-        # Compare each patch to border-average background prototype via cosine similarity
         border = torch.cat(
             [
                 patch_map[0, :, :],
@@ -167,10 +154,71 @@ async def segment_plate(
         bg_proto = torch.nn.functional.normalize(border.mean(dim=0, keepdim=True), dim=-1)
         norm_patches = torch.nn.functional.normalize(patch_map, dim=-1)
         similarity = (norm_patches * bg_proto).sum(dim=-1)
-        fg_score = (1.0 - similarity).cpu().numpy()
+        return (1.0 - similarity).cpu().numpy()
 
-    thresh = float(np.percentile(fg_score, 62))
-    ys, xs = np.where(fg_score >= thresh)
+
+def _otsu_threshold(arr: np.ndarray, bins: int = 64) -> float:
+    """Compute Otsu variance-maximizing threshold for foreground/background separation."""
+    flat = arr.ravel()
+    if flat.size == 0 or float(flat.max() - flat.min()) < 1e-6:
+        return float(np.percentile(flat, 62)) if flat.size else 0.0
+    hist, bin_edges = np.histogram(flat, bins=bins)
+    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    weight1 = np.cumsum(hist)
+    weight2 = np.cumsum(hist[::-1])[::-1]
+    mean1 = np.cumsum(hist * bin_centers) / np.maximum(weight1, 1e-8)
+    mean2 = (np.cumsum((hist * bin_centers)[::-1]) / np.maximum(weight2[::-1], 1e-8))[::-1]
+    var_between = weight1[:-1] * weight2[1:] * (mean1[:-1] - mean2[1:]) ** 2
+    idx = int(np.argmax(var_between))
+    return float(bin_centers[idx])
+
+
+def _largest_component_mask(fg_score: np.ndarray) -> tuple[np.ndarray, float]:
+    """
+    MONAI-style post-processing: Otsu thresholding -> morphological closing ->
+    hole filling -> largest connected component extraction.
+    """
+    otsu = _otsu_threshold(fg_score)
+    floor_p = float(np.percentile(fg_score, 52))
+    thresh = max(otsu, floor_p)
+    raw_mask = fg_score >= thresh
+    closed = ndi.binary_closing(raw_mask, structure=np.ones((3, 3), dtype=bool))
+    filled = ndi.binary_fill_holes(closed)
+    labeled, num_features = ndi.label(filled)
+    if num_features == 0:
+        return raw_mask, 0.0
+    sizes = ndi.sum(filled, labeled, range(1, num_features + 1))
+    best_label = int(np.argmax(sizes)) + 1
+    mask = labeled == best_label
+
+    fg_vals = fg_score[mask]
+    bg_vals = fg_score[~mask]
+    separation = float(fg_vals.mean() - bg_vals.mean()) if fg_vals.size and bg_vals.size else 0.1
+    return mask, separation
+
+
+@app.post("/api/cv/segment-plate")
+async def segment_plate(
+    file: UploadFile = File(...),
+    target_width: int = Form(360),
+    target_height: int = Form(380),
+):
+    """
+    Uses 2-view Test-Time Augmentation (TTA) with Hugging Face DINOv2
+    (facebook/dinov2-small), Otsu thresholding, and largest-connected-component
+    morphological refinement to extract P1-P4 workpiece corners.
+    """
+    raw = await file.read()
+    img = Image.open(io.BytesIO(raw)).convert("RGB")
+    processor, model = get_dinov2()
+
+    fg_orig = _dinov2_fg_map(img, processor, model)
+    fg_flip = np.fliplr(_dinov2_fg_map(ImageOps.mirror(img), processor, model))
+    fg_score = 0.5 * (fg_orig + fg_flip)
+    grid_side = fg_score.shape[0]
+
+    mask, separation = _largest_component_mask(fg_score)
+    ys, xs = np.where(mask)
 
     if len(xs) < 6:
         corners = [
@@ -196,10 +244,11 @@ async def segment_plate(
             {"x": int(xs[p3_idx] * scale_x), "y": int(ys[p3_idx] * scale_y), "label": "P3"},
             {"x": int(xs[p4_idx] * scale_x), "y": int(ys[p4_idx] * scale_y), "label": "P4"},
         ]
-        confidence = min(99, int(72 + (len(xs) / (grid_side * grid_side)) * 45))
+        area_ratio = len(xs) / float(grid_side * grid_side)
+        confidence = min(99, max(68, int(65 + separation * 90 + area_ratio * 25)))
 
     return {
-        "model": "facebook/dinov2-small",
+        "model": "facebook/dinov2-small (2-view TTA + Otsu-LCC)",
         "corners": corners,
         "confidence": confidence,
     }
@@ -213,21 +262,55 @@ async def analyze_tap(
 ):
     """
     Runs Hugging Face Audio Spectrogram Transformer (MIT/ast-finetuned-audioset)
-    on captured tap-test PCM samples + FFT peak extraction.
+    on captured tap-test PCM samples + 16,384-point zero-padded Hann FFT with
+    log-parabolic sub-bin peak interpolation and -3 dB Q-factor estimation.
     """
     arr = np.asarray(samples, dtype=np.float32)
     if arr.size < 256:
         return {"error": "Need at least 256 audio samples."}
 
-    # FFT dominant resonance peak
-    window = np.hanning(len(arr))
-    spectrum = np.abs(np.fft.rfft(arr * window))
-    freqs = np.fft.rfftfreq(len(arr), d=1.0 / sample_rate)
+    # 16,384-point zero-padded Hann FFT + log-parabolic interpolation
+    arr_dc = arr - np.mean(arr)
+    window = np.hanning(len(arr_dc))
+    n_fft = max(16384, 1 << int(math.ceil(math.log2(len(arr_dc)))))
+    spectrum = np.abs(np.fft.rfft(arr_dc * window, n=n_fft))
+    freqs = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
     valid_mask = (freqs >= 80) & (freqs <= 3500)
-    valid_freqs = freqs[valid_mask]
-    valid_spec = spectrum[valid_mask]
-    peak_idx = int(np.argmax(valid_spec)) if valid_spec.size else 0
-    peak_hz = float(round(valid_freqs[peak_idx], 1)) if valid_freqs.size else baseline_hz
+    valid_indices = np.where(valid_mask)[0]
+
+    if valid_indices.size > 0:
+        local_peak = int(np.argmax(spectrum[valid_indices]))
+        peak_bin = int(valid_indices[local_peak])
+        peak_mag = float(spectrum[peak_bin])
+        # Log-parabolic sub-bin refinement
+        if 1 <= peak_bin < len(spectrum) - 1:
+            y1 = math.log(max(1e-12, float(spectrum[peak_bin - 1])))
+            y2 = math.log(max(1e-12, peak_mag))
+            y3 = math.log(max(1e-12, float(spectrum[peak_bin + 1])))
+            denom = y1 - 2.0 * y2 + y3
+            delta = 0.5 * (y1 - y3) / denom if abs(denom) > 1e-12 else 0.0
+            delta = max(-0.5, min(0.5, delta))
+        else:
+            delta = 0.0
+        bin_hz = sample_rate / float(n_fft)
+        peak_hz = round((peak_bin + delta) * bin_hz, 2)
+
+        # -3 dB half-power bandwidth => Quality Factor Q
+        half_power = peak_mag / math.sqrt(2.0)
+        left_bin = peak_bin
+        while left_bin > valid_indices[0] and spectrum[left_bin] > half_power:
+            left_bin -= 1
+        right_bin = peak_bin
+        while right_bin < valid_indices[-1] and spectrum[right_bin] > half_power:
+            right_bin += 1
+        bw_hz = max(bin_hz, (right_bin - left_bin) * bin_hz)
+        q_factor = round(min(250.0, max(5.0, peak_hz / bw_hz)), 1)
+        noise_med = float(np.median(spectrum[valid_indices])) + 1e-12
+        snr_db = round(20.0 * math.log10(max(1.0, peak_mag / noise_med)), 1)
+    else:
+        peak_hz = baseline_hz
+        q_factor = 15.0
+        snr_db = 0.0
 
     extractor, model = get_ast()
     inputs = extractor(arr, sampling_rate=16000, return_tensors="pt").to(DEVICE)
@@ -236,10 +319,12 @@ async def analyze_tap(
         probs = torch.softmax(logits, dim=-1)
         top_prob, top_id = torch.max(probs, dim=-1)
 
-    delta_hz = round(peak_hz - baseline_hz, 1)
+    delta_hz = round(peak_hz - baseline_hz, 2)
     return {
-        "model": "MIT/ast-finetuned-audioset-10-10-0.4593",
+        "model": "MIT/ast-finetuned-audioset-10-10-0.4593 (16k-Parabolic)",
         "peak_hz": peak_hz,
+        "q_factor": q_factor,
+        "snr_db": snr_db,
         "delta_hz": delta_hz,
         "anomaly_flagged": abs(delta_hz) > 15.0,
         "ast_top_class": model.config.id2label[int(top_id.item())],

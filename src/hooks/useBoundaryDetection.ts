@@ -732,6 +732,210 @@ export function detectQuadFromSource(
     }
   }
 
+  // 5b. Fallback Multi-Cue Interior Saliency + Otsu + Largest Component OBB
+  // Catches textured PCBs, silkscreened boards, and clear acrylic cases on wood-grain desks
+  if (!bestCorners) {
+    const sal = new Float32Array(total);
+    let salMax = 0;
+    for (let y = margin; y < procH - margin; y++) {
+      for (let x = margin; x < procW - margin; x++) {
+        if (x < roiX0 || x > roiX1 || y < roiY0 || y > roiY1) continue;
+        const i = y * procW + x;
+        if (skinMask[i]) continue;
+        const bgDist =
+          Math.abs(blurR[i] - bgR) + Math.abs(blurG[i] - bgG) + Math.abs(blurB[i] - bgB);
+        const sVal = bgDist * 0.65 + mag[i] * 0.45;
+        sal[i] = sVal;
+        if (sVal > salMax) salMax = sVal;
+      }
+    }
+
+    if (salMax > 24) {
+      // 48-bin Otsu threshold on interior saliency
+      const bins = 48;
+      const hist = new Int32Array(bins);
+      let countSal = 0;
+      for (let y = margin; y < procH - margin; y++) {
+        for (let x = margin; x < procW - margin; x++) {
+          const v = sal[y * procW + x];
+          if (v <= 0) continue;
+          const b = Math.min(bins - 1, Math.floor((v / salMax) * (bins - 1)));
+          hist[b]++;
+          countSal++;
+        }
+      }
+      let sumAll = 0;
+      for (let b = 0; b < bins; b++) sumAll += b * hist[b];
+      let wB = 0;
+      let sumB = 0;
+      let maxVar = -1;
+      let bestBin = 18;
+      for (let b = 0; b < bins - 1; b++) {
+        wB += hist[b];
+        if (wB === 0) continue;
+        const wF = countSal - wB;
+        if (wF === 0) break;
+        sumB += b * hist[b];
+        const mB = sumB / wB;
+        const mF = (sumAll - sumB) / wF;
+        const between = wB * wF * (mB - mF) * (mB - mF);
+        if (between > maxVar) {
+          maxVar = between;
+          bestBin = b;
+        }
+      }
+      const salThresh = Math.max(28, (bestBin / (bins - 1)) * salMax);
+
+      // Binary mask + 1px morphological closing
+      const salBin = new Uint8Array(total);
+      for (let y = margin; y < procH - margin; y++) {
+        for (let x = margin; x < procW - margin; x++) {
+          const i = y * procW + x;
+          if (sal[i] >= salThresh && !skinMask[i]) salBin[i] = 1;
+        }
+      }
+      const salClosed = new Uint8Array(total);
+      for (let y = margin; y < procH - margin; y++) {
+        for (let x = margin; x < procW - margin; x++) {
+          const i = y * procW + x;
+          if (salBin[i]) {
+            salClosed[i] = 1;
+            continue;
+          }
+          const nCount =
+            salBin[i - 1] + salBin[i + 1] + salBin[i - procW] + salBin[i + procW];
+          if (nCount >= 3) salClosed[i] = 1;
+        }
+      }
+
+      // Largest interior connected component
+      const visSal = new Uint8Array(total);
+      let bestComp: number[] = [];
+      for (let y = margin + 2; y < procH - margin - 2; y++) {
+        for (let x = margin + 2; x < procW - margin - 2; x++) {
+          const start = y * procW + x;
+          if (!salClosed[start] || visSal[start]) continue;
+          let hd = 0;
+          let tl = 0;
+          queue[tl++] = start;
+          visSal[start] = 1;
+          const comp: number[] = [];
+          let cMinX = procW, cMaxX = 0, cMinY = procH, cMaxY = 0;
+          while (hd < tl) {
+            const idx = queue[hd++];
+            const px = idx % procW;
+            const py = (idx - px) / procW;
+            comp.push(idx);
+            if (px < cMinX) cMinX = px;
+            if (px > cMaxX) cMaxX = px;
+            if (py < cMinY) cMinY = py;
+            if (py > cMaxY) cMaxY = py;
+            const nbrs = [
+              px > margin ? idx - 1 : -1,
+              px < procW - margin - 1 ? idx + 1 : -1,
+              py > margin ? idx - procW : -1,
+              py < procH - margin - 1 ? idx + procW : -1,
+            ];
+            for (const nb of nbrs) {
+              if (nb >= 0 && salClosed[nb] && !visSal[nb]) {
+                visSal[nb] = 1;
+                queue[tl++] = nb;
+              }
+            }
+          }
+          const touchesEdge =
+            cMinX <= margin + 1 ||
+            cMaxX >= procW - margin - 2 ||
+            cMinY <= margin + 1 ||
+            cMaxY >= procH - margin - 2;
+          if (!touchesEdge && comp.length > bestComp.length) {
+            bestComp = comp;
+          }
+        }
+      }
+
+      if (bestComp.length >= total * 0.035 && bestComp.length <= total * 0.62) {
+        let sxSum = 0, sySum = 0;
+        for (const idx of bestComp) {
+          const px = idx % procW;
+          sxSum += px;
+          sySum += (idx - px) / procW;
+        }
+        const cx = sxSum / bestComp.length;
+        const cy = sySum / bestComp.length;
+
+        let optRad = 0;
+        let minArea = Infinity;
+        for (let deg = -45; deg <= 45; deg += 2) {
+          const rad = (deg * Math.PI) / 180;
+          const cos = Math.cos(rad);
+          const sin = Math.sin(rad);
+          let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+          for (let k = 0; k < bestComp.length; k += 2) {
+            const idx = bestComp[k];
+            const dx = (idx % procW) - cx;
+            const dy = ((idx - (idx % procW)) / procW) - cy;
+            const u = dx * cos + dy * sin;
+            const v = -dx * sin + dy * cos;
+            if (u < u0) u0 = u;
+            if (u > u1) u1 = u;
+            if (v < v0) v0 = v;
+            if (v > v1) v1 = v;
+          }
+          const a = (u1 - u0) * (v1 - v0);
+          if (a < minArea) {
+            minArea = a;
+            optRad = rad;
+          }
+        }
+        const cos = Math.cos(optRad);
+        const sin = Math.sin(optRad);
+        const us: number[] = [];
+        const vs: number[] = [];
+        for (let k = 0; k < bestComp.length; k += 2) {
+          const idx = bestComp[k];
+          const dx = (idx % procW) - cx;
+          const dy = ((idx - (idx % procW)) / procW) - cy;
+          us.push(dx * cos + dy * sin);
+          vs.push(-dx * sin + dy * cos);
+        }
+        us.sort((a, b) => a - b);
+        vs.sort((a, b) => a - b);
+        const pL = Math.floor(0.02 * (us.length - 1));
+        const pH = Math.ceil(0.98 * (us.length - 1));
+        const u0 = us[pL], u1 = us[pH], v0 = vs[pL], v1 = vs[pH];
+        const boxW = u1 - u0;
+        const boxH = v1 - v0;
+        const ar = boxH > 1 ? boxW / boxH : 1;
+        if (ar >= 0.25 && ar <= 4.0 && boxW * boxH <= total * 0.65) {
+          const proj = (u: number, v: number) => ({
+            x: Math.max(3, Math.min(procW - 4, cx + u * cos - v * sin)),
+            y: Math.max(3, Math.min(procH - 4, cy + u * sin + v * cos)),
+          });
+          const q = [proj(u0, v0), proj(u1, v0), proj(u1, v1), proj(u0, v1)];
+          bestProcCorners = q;
+          bestFillRatio = Math.min(1, bestComp.length / Math.max(1, boxW * boxH));
+          bestEdgeSupport = 0.72;
+          bestTrack = {
+            cx,
+            cy,
+            r: blurR[Math.round(cy) * procW + Math.round(cx)],
+            g: blurG[Math.round(cy) * procW + Math.round(cx)],
+            b: blurB[Math.round(cy) * procW + Math.round(cx)],
+            rad: optRad,
+          };
+          const scaleX = targetWidth / procW;
+          const scaleY = targetHeight / procH;
+          bestCorners = q.map((pt, idx) => ({
+            x: Math.round(Math.max(8, Math.min(targetWidth - 8, pt.x * scaleX))),
+            y: Math.round(Math.max(8, Math.min(targetHeight - 8, pt.y * scaleY))),
+            label: `P${idx + 1}`,
+          }));
+        }
+      }
+    }
+  }
+
   // 6. Render lightweight vector overlay highlighting segmented OBB quad perimeter (zero ImageData allocation)
   if (overlayCanvas) {
     if (overlayCanvas.width !== procW) overlayCanvas.width = procW;
