@@ -679,10 +679,10 @@ export function detectQuadFromSource(
 
     const edgeSupportRatio = supportedSamples / (4 * samplesPerSide);
     const sortedSides = [...sideSupport].sort((a, b) => a - b);
-    // Require 3 strong physical edges + genuine inside-vs-outside color contrast across >= 3 sides
-    const minWeakSide = roiNorm ? 0.16 : 0.20;
-    const minStrongSides = roiNorm ? 0.32 : 0.42;
-    const meanEdgeReq = roiNorm ? 0.38 : 0.48;
+    // Require strong physical edges on all 4 sides + genuine inside-vs-outside color contrast
+    const minWeakSide = roiNorm ? 0.20 : 0.28;
+    const minStrongSides = roiNorm ? 0.36 : 0.46;
+    const meanEdgeReq = roiNorm ? 0.42 : 0.54;
     if (
       sortedSides[0] < minWeakSide ||
       sortedSides[1] < minStrongSides ||
@@ -695,19 +695,20 @@ export function detectQuadFromSource(
     const bgDiff =
       Math.abs(meanRReg - bgR) + Math.abs(meanGReg - bgG) + Math.abs(meanBReg - bgB);
     // Reject patches whose interior color blends into the surrounding background wall without ultra-sharp edges
-    if (!roiNorm && bgDiff < 28 && edgeSupportRatio < 0.72) {
+    if (!roiNorm && bgDiff < 32 && edgeSupportRatio < 0.72) {
       continue;
     }
     const distToCenter = Math.hypot(centroidX - cxFrame, centroidY - cyFrame);
     const centrality = Math.max(0.15, 1.0 - 0.85 * (distToCenter / Math.max(1, maxDist)));
+    const areaNorm = Math.min(1.0, areaCount / Math.max(1, total * 0.35));
     let score =
-      areaCount *
-      Math.pow(Math.min(1, obbFillRatio), 1.5) *
-      Math.pow(edgeSupportRatio, 2.2) *
+      (0.35 + 0.65 * areaNorm) *
+      Math.pow(Math.min(1, obbFillRatio), 1.6) *
+      Math.pow(edgeSupportRatio, 2.8) *
       centrality *
-      (1 + Math.min(1.5, bgDiff / 80));
+      (1 + Math.min(1.8, bgDiff / 70));
     if (bordersTouched === 1) score *= 0.2;
-    if (isTrackedMatch) score *= 2.2;
+    if (isTrackedMatch) score *= 2.0;
 
     if (score > bestScore) {
       bestScore = score;

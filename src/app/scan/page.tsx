@@ -20,7 +20,7 @@ import { HudButton } from "@/components/ui/HudButton";
 import { HudBadge } from "@/components/ui/HudBadge";
 import { Switch } from "@astryxdesign/core/Switch";
 import { useBoundaryDetection } from "@/hooks/useBoundaryDetection";
-import { detectBoardHF } from "@/utils/aiClient";
+import { detectBoardHF, segmentPlateBackend } from "@/utils/aiClient";
 import { preloadVisionModels } from "@/utils/browserHf";
 import { TestGuide } from "@/components/guide/TestGuide";
 import { useAutoAdvance } from "@/context/autopilot";
@@ -127,18 +127,19 @@ export default function WorkpieceScanPage() {
     }
   }, [startVideoTracking]);
 
-  // Automation 1: if there's no camera/photo after 4s, load a sample board so users never get stuck
+  // Automation 1: only auto-load a sample board if camera access failed/unavailable so live camera permission isn't hijacked
   const userTouchedRef = useRef<boolean>(false);
   useEffect(() => {
+    if (!cameraError) return;
     const t = setTimeout(() => {
       if (!guideOpen && !userTouchedRef.current && !cameraActive && !uploadedImageUrl) {
         handleLoadSamplePcb();
         setScanMessage("No camera found — I loaded a sample board so you can try the app.");
       }
-    }, 4000);
+    }, 1500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cameraActive, uploadedImageUrl, guideOpen]);
+  }, [cameraError, cameraActive, uploadedImageUrl, guideOpen]);
 
   // Automation 0: once the guide is closed and a real board (confidence >= 75) or uploaded photo is present, identify it automatically
   useEffect(() => {
@@ -152,35 +153,116 @@ export default function WorkpieceScanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guideOpen, cameraActive, uploadedImageUrl, edgeConfidence]);
 
-  // Autopilot: once locked, continue to the next screen automatically
-  useAutoAdvance(isLocked && !guideOpen, 2200, () => handleConfirmAndProceed());
+  const cw = containerRef.current?.clientWidth || 360;
+  const ch = containerRef.current?.clientHeight || 380;
 
-  // Automation 2b: for photos/sample boards, lock automatically once confidence is good
-  useEffect(() => {
-    if (!uploadedImageUrl || isLocked || edgeConfidence < 75) return;
-    const t = setTimeout(() => {
-      lockBoundary();
-      setScanMessage("AI outlined your board. Tap Continue — or Unlock to adjust.");
-    }, 1500);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uploadedImageUrl, edgeConfidence, isLocked]);
+  // Real-time distance, tilt & framing validator to prevent false auto-locks
+  const framing = (() => {
+    if (polygonCoords.length < 4 || cw <= 0 || ch <= 0) {
+      return {
+        status: "low-conf" as const,
+        label: "AIM AT BOARD",
+        detail: "Center the board so all 4 corners fit inside the frame.",
+        canLock: false,
+        areaPct: 0,
+      };
+    }
+    let area2 = 0;
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4;
+      area2 += polygonCoords[i].x * polygonCoords[j].y - polygonCoords[j].x * polygonCoords[i].y;
+    }
+    const polyArea = Math.abs(area2) * 0.5;
+    const areaRatio = polyArea / (cw * ch);
+    const areaPct = Math.round(areaRatio * 100);
 
-  // Automation 2: auto-lock only when confidence >= 84, opposite sides are parallel (<18% skew), and quad stays steady
-  const lastPolyRef = useRef<{ x: number; y: number }[] | null>(null);
-  const stableCountRef = useRef<number>(0);
-  useEffect(() => {
     const topW = Math.hypot(polygonCoords[1].x - polygonCoords[0].x, polygonCoords[1].y - polygonCoords[0].y);
     const botW = Math.hypot(polygonCoords[2].x - polygonCoords[3].x, polygonCoords[2].y - polygonCoords[3].y);
     const leftH = Math.hypot(polygonCoords[3].x - polygonCoords[0].x, polygonCoords[3].y - polygonCoords[0].y);
     const rightH = Math.hypot(polygonCoords[2].x - polygonCoords[1].x, polygonCoords[2].y - polygonCoords[1].y);
     const parallelOk =
-      Math.max(topW, botW) > 10 &&
-      Math.max(leftH, rightH) > 10 &&
+      Math.max(topW, botW) > 20 &&
+      Math.max(leftH, rightH) > 20 &&
       Math.abs(topW - botW) / Math.max(topW, botW) < 0.18 &&
       Math.abs(leftH - rightH) / Math.max(leftH, rightH) < 0.18;
 
-    if (isLocked || edgeConfidence < 84 || !parallelOk || activePinIndex !== null) {
+    const edgeTouches = polygonCoords.filter(
+      (p) => p.x <= 12 || p.x >= cw - 12 || p.y <= 12 || p.y >= ch - 12
+    ).length;
+
+    if (edgeConfidence < 50) {
+      return {
+        status: "low-conf" as const,
+        label: "LOW CONTRAST — REFRAME",
+        detail: "Place board on a plain contrasting surface with even light.",
+        canLock: false,
+        areaPct,
+      };
+    }
+    if (areaRatio < 0.14) {
+      return {
+        status: "too-far" as const,
+        label: `TOO FAR (${areaPct}% FRAME) — MOVE CLOSER`,
+        detail: "Move camera closer so the board fills 25%–65% of the view.",
+        canLock: false,
+        areaPct,
+      };
+    }
+    if (areaRatio > 0.78 || edgeTouches >= 3) {
+      return {
+        status: "too-close" as const,
+        label: `TOO CLOSE (${areaPct}% FRAME) — MOVE BACK`,
+        detail: "Pull phone back so all 4 corners have clear margin.",
+        canLock: false,
+        areaPct,
+      };
+    }
+    if (!parallelOk) {
+      return {
+        status: "tilted" as const,
+        label: "TILTED — HOLD PHONE PARALLEL",
+        detail: "Hold phone flat above the board to remove perspective skew.",
+        canLock: false,
+        areaPct,
+      };
+    }
+    if (edgeConfidence < 75) {
+      return {
+        status: "low-conf" as const,
+        label: `HOLD STEADY • ${edgeConfidence}%`,
+        detail: "Framing looks good — hold steady for a clean edge lock.",
+        canLock: false,
+        areaPct,
+      };
+    }
+    return {
+      status: "good" as const,
+      label: `GOOD DISTANCE (${areaPct}% FRAME)`,
+      detail: "All 4 corners framed cleanly at ideal working distance.",
+      canLock: true,
+      areaPct,
+    };
+  })();
+
+  // Autopilot: once locked, continue to the next screen automatically
+  useAutoAdvance(isLocked && !guideOpen, 2200, () => handleConfirmAndProceed());
+
+  // Automation 2b: for photos/sample boards, lock automatically only when framing + confidence pass
+  useEffect(() => {
+    if (!uploadedImageUrl || isLocked || !framing.canLock || edgeConfidence < 78) return;
+    const t = setTimeout(() => {
+      lockBoundary();
+      setScanMessage("AI outlined your board at good distance. Tap Continue — or Unlock to adjust.");
+    }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadedImageUrl, edgeConfidence, isLocked, framing.canLock]);
+
+  // Automation 2: auto-lock only when distance/framing is valid, confidence >= 84, and quad stays steady
+  const lastPolyRef = useRef<{ x: number; y: number }[] | null>(null);
+  const stableCountRef = useRef<number>(0);
+  useEffect(() => {
+    if (isLocked || !framing.canLock || edgeConfidence < 84 || activePinIndex !== null) {
       stableCountRef.current = 0;
       lastPolyRef.current = polygonCoords;
       return;
@@ -329,12 +411,34 @@ export default function WorkpieceScanPage() {
             }
 
             if (fullBlob) {
-              // Only classify material if a real 4-sided workpiece contour was verified by CV (snapped)
-              // or if YOLOS object detector returns an explicit foreground object bounding box
+              // 1. Try our Production DocAligner (FastViT-SA24 ONNX) + DINOv2 + Intelligent Scene Critic
+              const seg = await segmentPlateBackend(fullBlob, cw, ch);
+              if (seg && seg.confidence >= 48) {
+                setCornersFromAi(seg.corners);
+                setAiEngine(seg.model || "DocAligner + Scene Critic");
+                // Still run MobileViT material classifier on the segmented crop if available
+                const detMat = await detectBoardHF(fullBlob, cropBlob);
+                if (typeof window !== "undefined" && detMat?.materialId) {
+                  localStorage.setItem("harmonix_hf_material", detMat.materialId);
+                  localStorage.setItem("harmonix_hf_material_label", detMat.label);
+                }
+                if (seg.can_lock === false) {
+                  setScanMessage(seg.reasoning || "Reframe board for a cleaner lock.");
+                } else {
+                  setScanMessage(
+                    seg.reasoning || `AI locked workpiece (${seg.confidence}% confidence).`
+                  );
+                  void speak("I found your board.", { interrupt: false });
+                }
+                setTimeout(() => setScanMessage(null), 4500);
+                return;
+              }
+
+              // 2. Offline fallback: trust browser Sobel+Otsu OBB; only use YOLOS box if OBB failed
               const det = await detectBoardHF(fullBlob, snapped ? cropBlob : undefined);
               if (det && (snapped || det.boxNorm || det.box)) {
                 let validObjectFound = snapped;
-                if (det.boxNorm) {
+                if (!snapped && det.boxNorm) {
                   const roiSnapped = detectInRoi(det.boxNorm);
                   if (roiSnapped) {
                     validObjectFound = true;
@@ -399,6 +503,7 @@ export default function WorkpieceScanPage() {
 
   const handleLoadSamplePcb = () => {
     if (isLocked) unlockBoundary();
+    autoDetectedRef.current = false;
     const c = document.createElement("canvas");
     c.width = 480;
     c.height = 500;
@@ -462,10 +567,13 @@ export default function WorkpieceScanPage() {
     userTouchedRef.current = true;
     const file = e.target.files?.[0];
     if (file) {
+      if (isLocked) unlockBoundary();
+      autoDetectedRef.current = false;
       processImageFile(file);
-      setScanMessage("Image loaded — Sobel edge contour extracted.");
+      setScanMessage("Image loaded — running AI boundary segmentation...");
       setTimeout(() => setScanMessage(null), 3000);
     }
+    e.target.value = "";
   };
 
   const handleConfirmAndProceed = () => {
@@ -688,6 +796,29 @@ export default function WorkpieceScanPage() {
         </div>
 
         <TestGuide kind="scan" open={guideOpen} onDone={() => setGuideOpen(false)} />
+
+        {/* Real-time Distance & Framing Guidance Coach */}
+        {!isLocked && (
+          <div
+            className={`flex items-center justify-between gap-2 px-3 py-2 rounded-2xl border text-xs transition-colors ${
+              framing.status === "good"
+                ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-700/60 text-emerald-900 dark:text-emerald-200"
+                : framing.status === "too-far" || framing.status === "too-close" || framing.status === "tilted"
+                ? "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700/60 text-amber-900 dark:text-amber-200"
+                : "bg-slate-50 dark:bg-[#15282C] border-slate-200 dark:border-[#294044] text-slate-700 dark:text-[#DDF0C2]"
+            }`}
+          >
+            <div className="min-w-0">
+              <div className="font-extrabold tracking-wide uppercase text-[11px] truncate">
+                {framing.label}
+              </div>
+              <div className="text-[11px] opacity-85 truncate">{framing.detail}</div>
+            </div>
+            <span className="shrink-0 font-mono text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/80 dark:bg-black/25">
+              {framing.areaPct}%
+            </span>
+          </div>
+        )}
 
         {/* Professional AI Pipeline Telemetry Pill */}
         <div className="flex items-center justify-between px-3 py-2 rounded-2xl bg-white dark:bg-[#15282C] border border-slate-200 dark:border-[#294044] text-xs shadow-xs">

@@ -1,0 +1,226 @@
+\documentclass[journal]{IEEEtran}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage[nocompress]{cite}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+
+\begin{document}
+\bstctlcite{IEEEexample:BSTcontrol}
+
+\title{HARMONIX-AR: Hybrid Edge-Cloud Multimodal Diagnostics for Thin-Plate Resonance and Nondestructive Testing}
+
+\author{Nandheesa~Prasad~K,~\IEEEmembership{Student~Member,~IEEE,}
+        and~Surendran~R,~\IEEEmembership{Member,~IEEE}%
+\thanks{N. Prasad K and R. Surendran are with the Department of Electronics and Communication Engineering, Saveetha Institute of Medical and Technical Sciences (SIMATS), Chennai 602105, India (e-mail: 192511181.simats@saveetha.com).}}
+
+\maketitle
+
+\begin{abstract}
+Structural resonance in thin planar assemblies, including printed circuit boards and metallic enclosures, accelerates solder-joint cracking and structural fatigue under sustained vibration. Conventional modal metrology relies on laser Doppler vibrometry, physical shaker tables, or offline finite-element meshing, each of which requires specialized laboratory hardware or manual geometric setup. This paper presents HARMONIX-AR, a zero-contact, hybrid edge-cloud diagnostic system that integrates monocular computer vision, tap-test acoustic spectroscopy, and Kirchhoff--Love plate mechanics on commodity mobile devices. For optical workpiece localization, a multi-cue browser tracker combines color-Sobel gradients and Otsu interior saliency with server-side two-view DINOv2 segmentation and largest-connected-component filtering to recover oriented plate boundaries under clutter. For acoustic modal identification, a zero-padded Hann-windowed fast Fourier transform with logarithmic parabolic interpolation and an Audio Spectrogram Transformer extracts modal frequencies and damping factors from transient impulses. These geometric and spectral estimates drive a standoff-aware Kirchhoff--Love solver with Gaussian pin clamping to compute standing-wave Chladni contours, Von Mises bending stresses, and Basquin fatigue life in augmented reality. Monte Carlo benchmarks across four engineering substrates confirm sub-hertz pitch accuracy and sub-millisecond solver latency.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Acoustic spectroscopy, augmented reality, Chladni figures, nondestructive testing, thin plates.
+\end{IEEEkeywords}
+
+\section{Introduction}
+Thin planar structures form the mechanical backbone of modern electronics and lightweight aerospace assemblies. Multilayer FR-4 printed circuit boards (PCBs), aluminum access panels, and polymeric housings regularly experience harmonic and broadband vibration during operation~\cite{steinberg2000vibration}. When ambient forcing matches a natural eigenmode $(m, n)$, standing-wave amplification produces stationary zero-displacement nodal contours alongside high-curvature antinodes~\cite{chladni1787entdeckungen,leissa1969vibration}. Solder joints and surface-mount packages positioned near antinodes endure cyclic bending strain that drives high-cycle fatigue failure~\cite{basquin1910exponential,steinberg2000vibration}.
+
+Fast, non-contact modal screening in benchtop or field environments poses three coupled challenges. First, optical workpiece localization from a single handheld camera suffers from background clutter, specular glare, and hand occlusion, which fragment raw gradient contours~\cite{otsu1979threshold,canny1986computational}. Second, acoustic tap excitation on commodity microphones yields brief, damped transients whose modal peaks smear under coarse discrete Fourier transforms~\cite{harris1978windows,smith1987parshl}. Third, physical assemblies rarely vibrate with ideal free edges because mounting standoffs pin local displacement and alter classical mode shapes~\cite{timoshenko1959theory,ewins2000modal}.
+
+Existing nondestructive testing (NDT) modalities address individual aspects of this task at high operational cost. Laser Doppler vibrometry achieves sub-micrometer velocity resolution across complex surfaces, yet optical heads and scanning mirrors remain confined to metrology laboratories~\cite{castellini2006laser}. Physical shaker tables and sand-sprinkled Chladni excitation visualize nodal lines directly, while contaminating sensitive electronics and requiring rigid fixture mounting~\cite{ewins2000modal}. Offline finite-element solvers predict stress fields accurately, though manual boundary meshing and material calibration prevent rapid benchtop iteration~\cite{worden2007application,farrar2007introduction}.
+
+In spectral instrumentation, interpolated discrete Fourier transform (IpDFT) methods have evolved from foundational single-tone maximum-likelihood bounds~\cite{rife1974single} and Hann-windowed algebraic corrections~\cite{jain1979high,grandke1983interpolation} to multipoint weighted estimators~\cite{agrez2002weighted,belega2008frequency,belega2010accuracy} and iterative out-of-band interference rejection~\cite{wang2022novel,song2022fast,garciaveloso2024computationally}. Parallel advances in vision transformers~\cite{fang2021yolos,mehta2022mobilevit,oquab2023dinov2}, audio transformers~\cite{gong2021ast}, and physics-informed models~\cite{raissi2019pinns} enable learned perception and surrogate modeling, yet an integrated browser-to-cloud system linking markerless geometry, sub-bin tap spectroscopy, and standoff-aware plate mechanics has remained absent.
+
+We developed HARMONIX-AR as a browser-accessible multimodal system backed by a PyTorch inference service. Lightweight browser signal processing handles low-latency contour tracking and impulse capture, while the PyTorch backend refines foreground masks, classifies spectral signatures, and evaluates tensorized modal fields. Analytical Kirchhoff--Love mechanics bridges both paths to render nodal contours, bending stress, and fatigue life over the live camera feed. To summarize, the contributions of this paper include:
+\begin{enumerate}
+\item A hybrid edge-cloud optical localization pipeline that pairs browser color-Sobel gradients and Otsu saliency with server-side two-view DINOv2 segmentation and largest-connected-component filtering to extract oriented plate boundaries under clutter.
+\item A sub-bin acoustic modal identification scheme combining ambient microphone roll-off calibration, crest-factor impulse gating, zero-padded logarithmic parabolic fast Fourier interpolation, and Audio Spectrogram Transformer classification.
+\item A standoff-aware Kirchhoff--Love solver implemented in TypeScript and PyTorch that applies Gaussian pin clamping to compute Chladni contours, Von Mises bending stresses, and Basquin fatigue life at interactive frame rates.
+\item A systematic evaluation across four engineering substrates demonstrating sub-hertz synthetic pitch accuracy across $5\text{--}30$~dB SNR, clutter-robust mask extraction, and measured CPU inference latencies across all pipeline stages.
+\end{enumerate}
+
+Section~II formalizes the multimodal modal-estimation problem and its physical bottlenecks. Section~III details the hybrid optical, acoustic, and Kirchhoff--Love methodology. Section~IV presents the experimental design, sensitivity benchmarks, and live model latencies. Section~V concludes the paper.
+
+\section{Problem Definition and Analysis}
+Consider a thin rectangular elastic plate occupying the domain $\Omega = [0, a] \times [0, b] \subset \mathbb{R}^2$ with width $a$ (m), height $b$ (m), and uniform thickness $h$ (m) satisfying the thin-plate regime $h \ll \min(a, b)$~\cite{timoshenko1959theory}. Let $\theta = (E, \nu, \rho, \sigma_y)$ denote the homogeneous isotropic material tuple comprising Young's modulus $E$ (Pa), Poisson's ratio $\nu$, mass density $\rho$ ($\text{kg/m}^3$), and tensile yield strength $\sigma_y$ (Pa). Let $\mathcal{P} = \{\mathbf{p}_k\}_{k=1}^{K} \subset \Omega$ denote a finite set of rigid mounting standoff coordinates.
+
+During benchtop inspection, the sensing system acquires a monocular RGB frame $\mathbf{I} \in \mathbb{R}^{H \times W \times 3}$ and a single-channel discrete acoustic impulse $x[n]$ sampled at rate $f_s$ (Hz) over $N$ samples following a mechanical tap. Given physical parameters $(\theta, \mathcal{P})$ and multimodal observations $(\mathbf{I}, x[n])$, the diagnostic task is formulated as the joint inverse-forward mapping
+\begin{equation}
+\mathcal{F} : \bigl(\mathbf{I},\, x[n],\, \theta,\, \mathcal{P}\bigr) \mapsto \bigl(\mathcal{Q}^*,\, \{f^*_{m,n}\},\, W^*(x,y),\, \sigma^*_{\mathrm{vm}}(x,y),\, N^*_f(x,y)\bigr),
+\label{eq:overall_problem}
+\end{equation}
+where $\mathcal{Q}^* = \{\mathbf{q}_1, \mathbf{q}_2, \mathbf{q}_3, \mathbf{q}_4\} \subset \mathbb{R}^2$ represents the oriented quadrilateral plate corners in image space, $\{f^*_{m,n}\}$ are the identified natural eigenfrequencies (Hz), $W^*(x,y)$ is the normalized transverse standing-wave deflection field on $\Omega$, $\sigma^*_{\mathrm{vm}}(x,y)$ is the peak Von Mises bending stress (Pa), and $N^*_f(x,y)$ is the predicted high-cycle fatigue life (cycles).
+
+Three coupled physical and observational constraints govern the solvability of~\eqref{eq:overall_problem}:
+\begin{enumerate}
+\item \textit{Optical Clutter and Skin Interference:} Handheld frames contain textured benchtop surfaces and operator hands. Edge-only detectors~\cite{canny1986computational} fragment along internal PCB traces or erroneously lock onto skin contours rather than the plate boundary $\mathcal{Q}^*$.
+\item \textit{Finite-Window Spectral Leakage:} A sharp impulse decays exponentially at rate $\alpha_{m,n} = \pi f_{m,n} / Q_{m,n}$, where $Q_{m,n}$ is the modal quality factor~\cite{beards1996structural}. Short observation windows yield coarse bin spacing $\Delta f_{\mathrm{bin}} = f_s / N$, introducing picket-fence quantization error up to $\Delta f_{\mathrm{bin}}/2$ and masking closely spaced modes~\cite{offelli1990interpolation,schoukens1992interpolated}.
+\item \textit{Boundary Pinning Distortion:} Classical Chladni mode shapes assume unrestrained edges~\cite{leissa1969vibration}. Rigid standoffs $\mathbf{p}_k \in \mathcal{P}$ enforce local zero-deflection constraints that shift nodal contours and redistribute antinodal bending curvature.
+\end{enumerate}
+These constraints motivate three design requirements: foreground-aware multi-cue segmentation for $\mathcal{Q}^*$, zero-padded sub-bin spectral interpolation for $\{f^*_{m,n}\}$, and spatially attenuated Kirchhoff--Love fields conditioned on $\mathcal{P}$.
+
+\section{Methodology}
+HARMONIX-AR resolves~\eqref{eq:overall_problem} through a coupled three-stage architecture illustrated in Fig.~\ref{fig:arch}. Let $\Phi_{\mathrm{cv}}$ denote the hybrid optical localization operator, $\Phi_{\mathrm{ac}}$ denote the sub-bin acoustic modal estimator, and $\Phi_{\mathrm{mech}}$ denote the standoff-aware Kirchhoff--Love solver. The end-to-end diagnostic pipeline executes as
+\begin{equation}
+\bigl(\mathcal{Q}^*,\, \{f^*_{m,n}\},\, W^*,\, \sigma^*_{\mathrm{vm}},\, N^*_f\bigr)
+= \Phi_{\mathrm{mech}}\!\Bigl(\Phi_{\mathrm{cv}}(\mathbf{I}),\, \Phi_{\mathrm{ac}}\bigl(x[n]\bigr),\, \theta,\, \mathcal{P}\Bigr).
+\label{eq:overall_framework}
+\end{equation}
+Browser execution handles interactive frame rendering and impulse capture, while the PyTorch service supplies deep visual segmentation, spectrogram classification, and tensorized field evaluation.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{v3_fig1.png}
+\caption{Normalized plate domain with standoffs and hybrid edge-cloud signal flow.}
+\label{fig:arch}
+\end{figure}
+
+\subsection{Hybrid Edge-Cloud Optical Localization}
+In the browser edge tracker, input frames are downsampled to a working width of $144$~pixels and smoothed with a $5$-tap separable kernel to suppress sensor noise. To prevent operator hands from capturing the bounding box, pixels satisfying chrominance skin bounds in luminance--chrominance ($\mathrm{YC_bC_r}$) space are masked prior to edge extraction. Three-channel color-Sobel gradients isolate boundary energy, and a $4$-connected region-growing pass extracts candidate silhouettes for minimum-area oriented bounding box (OBB) fitting. When high-frequency PCB silkscreen or background clutter fragments gradient edges, a $48$-bin Otsu threshold~\cite{otsu1979threshold} computed over an interior-weighted saliency map recovers a coherent foreground region for OBB estimation.
+
+When complex benchtop backgrounds degrade local edge cues, the frame is transmitted to the PyTorch service running `facebook/dinov2-small`~\cite{oquab2023dinov2}. To mitigate viewpoint bias, we evaluate two-view test-time augmentation (original and horizontally flipped views) and average the spatial attention foreground maps. An adaptive Otsu threshold binarizes the attention map, and largest-connected-component (LCC) filtering retains the primary workpiece mask, removing disconnected background regions prior to projecting $\mathcal{Q}^*$.
+
+\subsection{Sub-Bin Acoustic Modal Identification}
+Prior to tap capture, the microphone channel constructs an ambient noise floor profile and compares spectral energy in the $50\text{--}150$~Hz band against $350\text{--}1200$~Hz to compensate for smartphone MEMS high-pass roll-off. An incoming frame triggers modal capture only when its root-mean-square (RMS) amplitude exceeds ambient noise by a factor of $2.6$ and its crest factor satisfies $C_f = \max |x[n]| / x_{\mathrm{rms}} \ge 3.4$, isolating sharp mechanical impulses from speech or handling noise.
+
+Each validated transient is multiplied by a Hann window~\cite{harris1978windows} and zero-padded to $N_{\mathrm{zp}} = 16\,384$ points to compute the magnitude spectrum $|X[k]|$. For every local spectral peak at bin $k^*$, logarithmic parabolic interpolation refines the fractional bin offset~\cite{smith1987parshl}:
+\begin{equation}
+\delta = \frac{1}{2}\, \frac{\ln|X[k^*-1]| - \ln|X[k^*+1]|}{\ln|X[k^*-1]| - 2\ln|X[k^*]| + \ln|X[k^*+1]|},
+\label{eq:parabolic}
+\end{equation}
+yielding the sub-bin modal frequency $f^* = (k^* + \delta) f_s / N_{\mathrm{zp}}$. The server concurrently estimates the $-3$~dB half-power quality factor $Q$ (clamped to $[5, 250]$) and evaluates `MIT/ast-finetuned-audioset` (AST)~\cite{gong2021ast} on the log-mel spectrogram to classify tap acoustics and flag anomalous frequency shifts.
+
+\subsection{Standoff-Aware Kirchhoff--Love and PyTorch Solver}
+Given plate dimensions $(a, b)$, thickness $h$, and material tuple $\theta$, the flexural rigidity is $D = E h^3 / [12(1 - \nu^2)]$~\cite{timoshenko1959theory}. Under free-edge boundary conditions, the modal eigenfrequency of mode $(m, n)$ is evaluated as~\cite{leissa1969vibration}
+\begin{equation}
+f_{m,n} = \frac{\pi}{2} \sqrt{\frac{D}{\rho h}} \left[ \left(\frac{m}{a}\right)^2 + \left(\frac{n}{b}\right)^2 \right].
+\label{eq:eigenfreq}
+\end{equation}
+To model rigid mounting standoffs $\mathcal{P}$ without full finite-element remeshing, our PyTorch `ModalPINNSurrogate` module modulates the normalized free-edge Chladni standing wave $W_{\mathrm{free}}(x_n, y_n)$~\cite{chladni1787entdeckungen} on $[0, 1]^2$ using a multiplicative Gaussian suppression envelope:
+\begin{equation}
+W_{\mathrm{clamped}}(x_n, y_n) = W_{\mathrm{free}}(x_n, y_n) \prod_{k=1}^{K} \left(1 - \exp\!\left(-\frac{\|\mathbf{x}_n - \mathbf{p}_k\|_2^2}{0.018}\right)\right).
+\label{eq:standoff}
+\end{equation}
+Finite-difference plate curvatures yield surface bending stresses $\sigma_x, \sigma_y, \tau_{xy}$, from which the Von Mises equivalent stress follows as $\sigma_{\mathrm{vm}} = \sqrt{\sigma_x^2 - \sigma_x \sigma_y + \sigma_y^2 + 3\tau_{xy}^2}$. High-cycle fatigue endurance is estimated via the Basquin power law $N_f = 10^3 (\sigma_f' / \sigma_{\mathrm{vm}})^{1/b_f}$~\cite{basquin1910exponential}. For interactive augmented reality (AR) rendering, the browser shader precomputes a $64 \times 64$ amplitude and gradient lookup table to animate $12\,288$ Chladni particles via constant-time array lookups.
+
+\section{Results and Discussions}
+
+\subsection{Experimental Design}
+We evaluate HARMONIX-AR across four engineering plate substrates of standardized footprint $a = 0.18$~m, $b = 0.12$~m, and thickness $h = 1.6$~mm: FR-4 fiberglass epoxy, Aluminum~6061-T6, Carbon Steel, and Cast Acrylic. Acoustic identification accuracy is benchmarked across $20$ Monte Carlo trials per mode using synthetic damped sinusoids ($N = 4096$ samples, $20$~dB additive white Gaussian noise) at both $f_s = 16$~kHz and $44.1$~kHz across four reference FR-4 resonances, plus a $5\text{--}30$~dB SNR sensitivity sweep at $381.42$~Hz. Vision post-processing evaluates Otsu-LCC across $30$ noisy $256 \times 256$ synthetic attention maps containing an injected clutter island. Live `facebook/dinov2-small` and `MIT/ast-finetuned-audioset` CPU latency benchmarks, standoff sensitivity sweeps ($0$, $2$, and $4$ pins), and TypeScript solver timings run on an Intel Core i7 CPU ($16$~GB RAM, Python~3.14.6, PyTorch~2.13.0).
+
+\subsection{Baselines and Metrics}
+For acoustic identification, we compare an unpadded $4096$-point Hann-windowed FFT against the proposed $16\,384$-point zero-padded logarithmic parabolic FFT~\eqref{eq:parabolic} using mean absolute frequency error $|f^* - f_{\mathrm{true}}|$, quality factor $Q$, peak signal-to-noise ratio (SNR), and execution latency. For mask refinement, global Otsu thresholding is compared against Otsu-LCC using intersection-over-union (IoU). For structural mechanics, free-edge and standoff-pinned displacement fields~\eqref{eq:standoff} are evaluated across pin counts alongside solver latency.
+
+\subsection{Main Results}
+Table~\ref{tab:materials} summarizes the constitutive properties and fundamental $(1,1)$ eigenfrequencies across the four test substrates, and Fig.~\ref{fig:dispersion}(a) illustrates modal dispersion across five mode indices. Metallic plates exhibit elevated eigenfrequencies due to their higher specific stiffness $E/\rho$ relative to polymeric acrylic and composite FR-4. Because~\eqref{eq:eigenfreq} scales linearly with $\sqrt{E/\rho}$, the modal spacing across modes $(1,1)$ through $(3,3)$ preserves a consistent geometric progression across all four materials, anchoring the mode matcher to the appropriate frequency band.
+
+\begin{table}[!t]
+\centering
+\caption{Substrate Properties and Fundamental $(1,1)$ Eigenfrequencies}
+\label{tab:materials}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Substrate & $E$ (GPa) & $\nu$ & $\rho$ ($\text{kg/m}^3$) & $f_{1,1}$ (Hz) \\
+\midrule
+FR-4 PCB & 22.0 & 0.19 & 1850 & 381.42 \\
+Al 6061-T6 & 68.9 & 0.33 & 2700 & 559.23 \\
+Carbon Steel & 200.0 & 0.30 & 7850 & 546.20 \\
+Cast Acrylic & 3.2 & 0.35 & 1190 & 184.56 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{v3_fig2.png}
+\caption{Modal dispersion across four substrates and sub-bin FFT estimation error.}
+\label{fig:dispersion}
+\end{figure}
+
+Table~\ref{tab:fft_bench} and Fig.~\ref{fig:dispersion}(b) compare raw unpadded peak picking with $16\,384$-point logarithmic parabolic interpolation~\eqref{eq:parabolic} at $16$~kHz and $20$~dB SNR. Unpadded $4096$-point FFTs suffer from coarse bin quantization whenever a modal resonance falls between discrete bins. Zero-padding to $16\,384$ points and fitting the log parabola reduces estimation error to sub-hertz levels across all four tested modes in under one millisecond per transient. At the highest mode, the $-3$~dB half-power bandwidth narrows past the server quality-factor clamp, reinforcing the role of AST classification for upper-band anomaly screening.
+
+\begin{table}[!t]
+\centering
+\caption{Measured 16~kHz Sub-Bin FFT Benchmark (20 Trials, 20~dB SNR)}
+\label{tab:fft_bench}
+\begin{tabular}{@{}ccccc@{}}
+\toprule
+True $f$ (Hz) & Raw Err. (Hz) & Para. Err. (Hz) & $Q$ & Peak SNR (dB) \\
+\midrule
+381.42 & 1.3925 & 0.0403 & 43.9 & 40.2 \\
+742.37 & 0.1825 & 0.0943 & 81.6 & 35.9 \\
+1524.83 & 1.4486 & 0.3110 & 144.5 & 30.9 \\
+2110.15 & 0.7750 & 0.0192 & 250.0 & 45.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Fig.~\ref{fig:snr_lat}(a) shows the $5\text{--}30$~dB SNR sensitivity sweep for mode $(1,1)$ at $16$~kHz. While the unpadded $4096$-point FFT remains pinned at the bin quantization floor across all noise levels, logarithmic parabolic interpolation improves monotonically with SNR, achieving nearly two orders of magnitude lower error at $30$~dB. Fig.~\ref{fig:snr_lat}(b) and Table~\ref{tab:latency} report the measured CPU execution latencies across all pipeline stages: browser TypeScript mechanics, PyTorch $64 \times 64$ grid evaluation, $16\,384$-point parabolic FFT, and Otsu-LCC post-processing all execute in low-millisecond or sub-millisecond time, whereas two-view DINOv2 and AST transformer passes execute asynchronously on demand.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{v5_fig5_sensitivity.png}
+\caption{SNR sensitivity sweep at 381.42 Hz and measured CPU pipeline latencies.}
+\label{fig:snr_lat}
+\end{figure}
+
+\begin{table}[!t]
+\centering
+\caption{Measured Pipeline Latency and Standoff Sensitivity on Intel i7 CPU}
+\label{tab:latency}
+\begin{tabular}{@{}llr@{}}
+\toprule
+Pipeline Stage / Configuration & Measured Output / Metric & Latency (ms) \\
+\midrule
+TS evalPlateMechanics (FR-4) & Stress \& Basquin $N_f$ & 0.0048 \\
+PyTorch Grid ($64\times64$, 2 pins) & mean$|W|=0.3702$ (2,2) & 0.1731 \\
+16k Log-Parabolic FFT (16 kHz) & Mean Err. 0.019--0.311 Hz & 0.2915 \\
+Otsu-LCC ($256\times256$ w/ clutter) & IoU $0.9653 \to 1.0000$ & 4.289 \\
+DINOv2-Small (2-view TTA CPU) & Warm forward pass & 196.6 \\
+AST AudioSet (4096 samples) & Warm forward pass & 1014.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Fig.~\ref{fig:chladni} contrasts the free-edge $(2,2)$ mode field with the standoff-pinned field~\eqref{eq:standoff} for two diagonal mounting pins. Applying the Gaussian attenuation envelope forces transverse deflection to vanish at both standoff coordinates while reducing mean normalized amplitude (Table~\ref{tab:latency}) and preserving smooth nodal contours across the unpinned interior. Fig.~\ref{fig:ui} illustrates the mobile AR interface executing boundary capture, Chladni particle overlay, acoustic oscilloscope tracking, and Von Mises stress mapping. Table~\ref{tab:hw_proto} defines the physical validation protocol reserved for upcoming accelerometer and laser Doppler vibrometer cross-checks on physical plates.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{v3_fig3.png}
+\caption{Free-edge versus standoff-pinned normalized deflection fields for mode $(2,2)$.}
+\label{fig:chladni}
+\end{figure}
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{v4_fig4_ui.png}
+\caption{Mobile augmented reality screens for boundary capture, Chladni overlay, and stress.}
+\label{fig:ui}
+\end{figure}
+
+\begin{table}[!t]
+\centering
+\caption{Physical Hardware Validation Protocol (Pending Lab Acquisition)}
+\label{tab:hw_proto}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Physical Test Plate & Reference Sensor & App $f^*$ (Hz) & Ref. $f$ (Hz) & IoU \\
+\midrule
+FR-4 PCB ($180\times120\times1.6$~mm) & MEMS Accel. / LDV & Pending & Pending & Pending \\
+Al 6061-T6 ($180\times120\times1.6$~mm) & MEMS Accel. / LDV & Pending & Pending & Pending \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Conclusion}
+HARMONIX-AR integrates browser-side optical localization with cloud-assisted modal estimation to inspect thin planar assemblies without physical contact. Pairing browser color-Sobel and Otsu saliency tracking with server-side two-view DINOv2 segmentation and Otsu-LCC filtering isolates oriented plate boundaries under complex benchtop clutter. Ambient MEMS calibration, crest-factor impulse gating, and zero-padded logarithmic parabolic FFT interpolation achieve sub-hertz pitch accuracy across $5\text{--}30$~dB SNR in under a millisecond on synthetic damped transients, while AST classifies tap acoustics. Conditioning Kirchhoff--Love fields on Gaussian standoff weights maps Chladni contours and Von Mises bending stress alongside Basquin fatigue life at sub-millisecond solver latency. Current kinematics assume uniform isotropic plate thickness and linear elastic small deflections. Future work will incorporate orthotropic multilayer PCB layups, localized component mass loading, and physical validation against scanning laser Doppler vibrometry following the protocol in Table~\ref{tab:hw_proto}.
+
+\section*{Acknowledgment}
+The authors acknowledge the use of Antigravity for drafting assistance, language editing, and manuscript formatting. All mathematical derivations, experimental benchmarks, citations, and technical conclusions were independently reviewed and verified by the authors.
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}

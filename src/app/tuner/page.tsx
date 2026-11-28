@@ -72,6 +72,14 @@ export default function FindItsNotePage() {
   const [isToneOn, setIsToneOn] = useState<boolean>(false);
   const [estimatedHz, setEstimatedHz] = useState<number>(740);
   const [livePeakHz, setLivePeakHz] = useState<number | null>(null);
+  const [micStatus, setMicStatus] = useState<
+    "idle" | "checking" | "too-quiet" | "clipping" | "noisy" | "good"
+  >("idle");
+  const [captureQuality, setCaptureQuality] = useState<{
+    verdict: "verified" | "clipping" | "too-quiet" | "low-snr";
+    label: string;
+    detail: string;
+  } | null>(null);
 
   const scopeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const capturedWaveRef = useRef<number[] | null>(null);
@@ -384,6 +392,8 @@ export default function FindItsNotePage() {
     setAstLabel(null);
     setTapCount(0);
     setLivePeakHz(null);
+    setCaptureQuality(null);
+    setMicStatus("checking");
     setFreqSource("measured");
     setPhase("listening");
     setMessage("Calibrating room noise & mic curve (0.4s)…");
@@ -433,7 +443,16 @@ export default function FindItsNotePage() {
             : "Wideband Acoustic Mic"
         } · Floor ${profile.noiseFloorDb} dBFS`
       );
-      setMessage("Listening live — tap your board firmly 1–2 times (or click Active Sonar Ping)…");
+      if (profile.ambientRms < 0.00015) {
+        setMicStatus("too-quiet");
+        setMessage("Mic signal is near zero — uncover bottom/top phone mic & tap firmly.");
+      } else if (profile.noiseFloorDb > -32 || profile.ambientRms > 0.025) {
+        setMicStatus("noisy");
+        setMessage(`Room noise is high (${profile.noiseFloorDb} dBFS) — hold phone mic 8–12 cm from board.`);
+      } else {
+        setMicStatus("good");
+        setMessage("Listening live — tap your board firmly 1–2 times (or click Active Sonar Ping)…");
+      }
 
       const validTaps: {
         hz: number;
@@ -476,6 +495,13 @@ export default function FindItsNotePage() {
         }
         const rms = Math.sqrt(s / shortBuf.length);
         setLevel(Math.min(1, rms * 16));
+        if (peakAmp >= 0.96) {
+          setMicStatus("clipping");
+        } else if (profile.noiseFloorDb > -32) {
+          setMicStatus("noisy");
+        } else if (peakAmp > 0.0003) {
+          setMicStatus("good");
+        }
 
         // Update live 60 FPS oscilloscope & FFT bar display
         const liveWave: number[] = [];
@@ -527,7 +553,30 @@ export default function FindItsNotePage() {
         ) {
           await new Promise((r) => setTimeout(r, 95));
           analyser.getFloatTimeDomainData(buf);
+          let bufPeak = 0;
+          for (let k = 0; k < buf.length; k++) {
+            const a = Math.abs(buf[k]);
+            if (a > bufPeak) bufPeak = a;
+          }
+          if (bufPeak >= 0.96) {
+            setMicStatus("clipping");
+            setCaptureQuality({
+              verdict: "clipping",
+              label: "CLIPPING DETECTED — MOVE MIC BACK",
+              detail: "Peak hit >=96% full-scale. Hold phone mic 10–15 cm from board and re-tap.",
+            });
+            setMessage("Tap clipped the mic! Hold phone 10–15 cm away and tap again.");
+            await new Promise((r) => setTimeout(r, 260));
+            continue;
+          }
           const analysis = analyzeTapSignal(buf, sampleRate, 100, 3800, profile);
+          if (analysis && analysis.snrDb < 8) {
+            setCaptureQuality({
+              verdict: "low-snr",
+              label: `WEAK CAPTURE (SNR ${analysis.snrDb} dB)`,
+              detail: "Point phone mic closer (8–12 cm) toward the board center and tap firmer.",
+            });
+          }
           if (analysis && analysis.snrDb >= 8) {
             const tapEntry = {
               hz: analysis.peakHz,
@@ -583,6 +632,20 @@ export default function FindItsNotePage() {
 
       if (validTaps.length === 0) {
         setPhase("failed");
+        setCaptureQuality((prev) =>
+          prev ??
+          (profile.ambientRms < 0.00015
+            ? {
+                verdict: "too-quiet",
+                label: "MIC TOO QUIET / BLOCKED",
+                detail: "Almost no audio reached the mic. Uncover bottom/top phone mic or use Active Sonar Ping.",
+              }
+            : {
+                verdict: "low-snr",
+                label: "NO CLEAN IMPULSE CAPTURED",
+                detail: "Point phone mic 8–15 cm from board center and tap firmly with a fingernail/coin.",
+              })
+        );
         setMessage(
           "No tap impulse reached the threshold. Tap closer to the microphone, or click Active Sonar Ping below for guaranteed speaker-to-mic measurement."
         );
@@ -592,6 +655,19 @@ export default function FindItsNotePage() {
       const finalHz = Math.round(median(validTaps.map((c) => c.hz)) * 10) / 10;
       const finalQ = Math.round(median(validTaps.map((c) => c.q)));
       const finalSnr = Math.round(median(validTaps.map((c) => c.snr)));
+      setCaptureQuality(
+        finalSnr >= 14
+          ? {
+              verdict: "verified",
+              label: `CAPTURE VERIFIED • CLEAN RING (${finalSnr} dB SNR)`,
+              detail: `Mic placement optimal (${profile.micType === "mems-mobile" ? "MEMS phone mic" : "Wideband mic"}).`,
+            }
+          : {
+              verdict: "verified",
+              label: `CAPTURE OK • MODERATE SNR (${finalSnr} dB)`,
+              detail: "Valid ring locked. For sharper Q, point phone mic 8–12 cm from board center.",
+            }
+      );
       const minTapHz = Math.min(...validTaps.map((c) => c.hz));
       const maxTapHz = Math.max(...validTaps.map((c) => c.hz));
       const meanTapHz = validTaps.reduce((a, c) => a + c.hz, 0) / validTaps.length;
@@ -739,6 +815,42 @@ export default function FindItsNotePage() {
           )}
         </div>
         <TestGuide kind="tap" open={guideOpen} onDone={() => setGuideOpen(false)} />
+
+        {/* Live Microphone Placement & Capture Verification Pill */}
+        {(phase === "listening" || captureQuality !== null) && (
+          <div
+            className={`px-3 py-2 rounded-2xl border text-xs transition-colors ${
+              captureQuality
+                ? captureQuality.verdict === "verified"
+                  ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-700/60 text-emerald-900 dark:text-emerald-200"
+                  : "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700/60 text-amber-900 dark:text-amber-200"
+                : micStatus === "good"
+                ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-700/60 text-emerald-900 dark:text-emerald-200"
+                : micStatus === "clipping" || micStatus === "too-quiet" || micStatus === "noisy"
+                ? "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700/60 text-amber-900 dark:text-amber-200"
+                : "bg-slate-50 dark:bg-[#15282C] border-slate-200 dark:border-[#294044] text-slate-700 dark:text-[#DDF0C2]"
+            }`}
+          >
+            <div className="font-extrabold tracking-wide uppercase text-[11px]">
+              {captureQuality
+                ? captureQuality.label
+                : micStatus === "clipping"
+                ? "MIC CLIPPING — HOLD PHONE 10–15 CM BACK"
+                : micStatus === "too-quiet"
+                ? "MIC TOO QUIET — CHECK PHONE MIC OPENING"
+                : micStatus === "noisy"
+                ? "HIGH ROOM NOISE — MOVE MIC 8–12 CM FROM BOARD"
+                : micStatus === "good"
+                ? "MIC PLACEMENT GOOD — TAP BOARD NOW"
+                : "CHECKING MICROPHONE PLACEMENT…"}
+            </div>
+            <div className="text-[11px] opacity-85">
+              {captureQuality
+                ? captureQuality.detail
+                : "Phone mics vary (bottom/top bezel) — keep the mic port unobstructed 8–15 cm from the board."}
+            </div>
+          </div>
+        )}
 
         {/* Real-Time Dual Oscilloscope & 65k-FFT Spectrum Analyzer HUD */}
         <ChamferedCard className="p-3 space-y-2">

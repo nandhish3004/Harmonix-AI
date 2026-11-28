@@ -73,16 +73,26 @@ function fftInPlace(re: Float64Array, im: Float64Array): void {
  * while stationary background hum is ignored.
  */
 export function isSharpTapImpulse(samples: Float32Array, ambientRms: number): boolean {
+  if (samples.length < 64) return false;
   let sum = 0;
   let peak = 0;
+  const half = Math.floor(samples.length / 2);
+  let sumH1 = 0;
+  let sumH2 = 0;
   for (let i = 0; i < samples.length; i++) {
     const a = Math.abs(samples[i]);
-    sum += samples[i] * samples[i];
+    const sq = samples[i] * samples[i];
+    sum += sq;
+    if (i < half) sumH1 += sq;
+    else sumH2 += sq;
     if (a > peak) peak = a;
   }
   const rms = Math.sqrt(sum / Math.max(1, samples.length));
   const crest = peak / Math.max(1e-6, rms);
-  return rms > Math.max(0.014, ambientRms * 2.6) && crest >= 3.4;
+  const rmsH1 = Math.sqrt(sumH1 / Math.max(1, half));
+  const rmsH2 = Math.sqrt(sumH2 / Math.max(1, samples.length - half));
+  const decayRatio = rmsH1 / Math.max(1e-6, rmsH2);
+  return rms > Math.max(0.014, ambientRms * 2.6) && (crest >= 2.8 || decayRatio >= 1.18);
 }
 
 /**
@@ -201,7 +211,7 @@ export function analyzeTapSignal(
   if (samples.length >= w3End && w3End > w1End) {
     const rmsW1 = windowRms(samples, peakIdx, w1End);
     const rmsW3 = windowRms(samples, w1End, w3End);
-    if (rmsW1 <= rmsW3 * 1.15) {
+    if (rmsW1 <= rmsW3 * 1.03) {
       return null;
     }
   }
@@ -279,7 +289,7 @@ export function analyzeTapSignal(
   const p75 = sorted[Math.floor(sorted.length * 0.75)];
   const medianVal = Math.max(rawMedian, p75 * 0.35, 1e-9);
   const snrDb = Math.round(20 * Math.log10(cand[0].m / medianVal));
-  if (snrDb < 8) return null;
+  if (snrDb < 5) return null;
 
   const refine = (i: number): number => {
     const a = Math.log(mag[i - 1] + 1e-18);

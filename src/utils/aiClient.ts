@@ -93,6 +93,48 @@ function materialFromLabel(label: string): BoardDetection["materialId"] {
   return null;
 }
 
+export interface BackendSegmentation {
+  model: string;
+  corners: { x: number; y: number; label: string }[];
+  confidence: number;
+  can_lock?: boolean;
+  guidance?: "good" | "too-far" | "too-close" | "tilted" | "low-contrast" | "hand-occlusion";
+  reasoning?: string;
+}
+
+/**
+ * Calls the local/cloud PyTorch DINOv2 + High-Res Color/PCA-Quad endpoint
+ * via the Next.js /api/cv/segment-plate proxy. Returns null quickly if offline.
+ */
+export async function segmentPlateBackend(
+  imageBlob: Blob,
+  targetWidth: number,
+  targetHeight: number
+): Promise<BackendSegmentation | null> {
+  try {
+    const form = new FormData();
+    form.append("file", imageBlob, "frame.jpg");
+    form.append("target_width", String(Math.round(targetWidth)));
+    form.append("target_height", String(Math.round(targetHeight)));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
+    const res = await fetch("/api/cv/segment-plate", {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = (await res.json()) as BackendSegmentation;
+    if (Array.isArray(data?.corners) && data.corners.length === 4) {
+      return data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Fast parallel object-detection + MobileViT material ID (Cloud if HF_TOKEN set, else browser ONNX). */
 export async function detectBoardHF(
   fullImage: Blob,
