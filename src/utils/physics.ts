@@ -213,7 +213,7 @@ export function computeEigenfrequencyHz(
   const stiffeningFactor = Math.sqrt(1 + 0.14 * Math.max(0, standoffCount));
   const rawFreq = (Math.PI / 2) * Math.sqrt(D / (rho * h)) * waveNumberSq * stiffeningFactor;
 
-  return Math.round(Math.max(80, Math.min(4500, rawFreq)));
+  return Math.round(Math.max(80, Math.min(40000, rawFreq)));
 }
 
 /**

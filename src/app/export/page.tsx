@@ -154,11 +154,19 @@ export default function ExportReportPage() {
             : "Kirchhoff-Love Theoretical Eigenmode")
       );
 
-      const s = Number(localStorage.getItem("harmonix_safety_score"));
-      if (Number.isFinite(s) && s > 0) setSafetyScore(s);
-
       const def = localStorage.getItem("harmonix_defect_detected");
-      setDefectDetected(def !== null ? def === "true" : Math.abs(mHz - bHz) > 15);
+      const isDefect = def !== null ? def === "true" : Math.abs(mHz - bHz) / Math.max(1, bHz) > 0.08;
+      setDefectDetected(isDefect);
+
+      const s = Number(localStorage.getItem("harmonix_safety_score"));
+      const shiftRatio = Math.abs(mHz - bHz) / Math.max(1, bHz);
+      if (shiftRatio > 0.15) {
+        // Reconcile safety score with severe modal frequency shift so NON-CONFORMANT never shows 97/100
+        const penaltyScore = Math.max(18, Math.round(100 - shiftRatio * 82));
+        setSafetyScore(Number.isFinite(s) && s > 0 ? Math.min(s, penaltyScore) : penaltyScore);
+      } else if (Number.isFinite(s) && s > 0) {
+        setSafetyScore(s);
+      }
     }
 
     // Evaluate peak Kirchhoff-Love von Mises stress over 25x25 plate grid

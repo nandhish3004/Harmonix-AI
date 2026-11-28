@@ -99,8 +99,8 @@ export default function FindItsNotePage() {
       getStoredPlateGeometry().aspectRatio,
       0
     );
-    const m22 = modes.find((m) => m.id === "mode-2-2") ?? modes[2];
-    setEstimatedHz(m22.freqHz);
+    const m11 = modes.find((m) => m.id === "mode-1-1") ?? modes[0];
+    setEstimatedHz(m11.freqHz);
     return () => {
       cancelRef.current = true;
       oscRef.current?.stop();
@@ -569,7 +569,21 @@ export default function FindItsNotePage() {
             await new Promise((r) => setTimeout(r, 260));
             continue;
           }
-          const analysis = analyzeTapSignal(buf, sampleRate, 100, 3800, profile);
+          const maxSearchHz = Math.min(8000, Math.floor(sampleRate * 0.42));
+          const analysis = analyzeTapSignal(buf, sampleRate, 100, maxSearchHz, profile);
+          if (analysis && analysis.peakHz < 520 && analysis.qFactor < 24 && estimatedHz > 750) {
+            setCaptureQuality({
+              verdict: "low-snr",
+              label: `TABLE THUD REJECTED (${analysis.peakHz} Hz · Q ${analysis.qFactor})`,
+              detail:
+                "Hard surface damped the PCB ring. Rest board on 2 pencils/foam or hold lightly by 1 corner & re-tap (or use Active Sonar Ping).",
+            });
+            setMessage(
+              `Rejected ${analysis.peakHz} Hz table thud (Q ${analysis.qFactor}). Lift board slightly off desk/floor & re-tap!`
+            );
+            await new Promise((r) => setTimeout(r, 260));
+            continue;
+          }
           if (analysis && analysis.snrDb < 8) {
             setCaptureQuality({
               verdict: "low-snr",
